@@ -28,7 +28,30 @@ async function run() {
 
 
 
+    app.get('/users', async (req, res) => {
+      
+      const users = await userCollection.find().toArray();
+      res.send(users);
     
+  });
+
+
+  app.get('/users/:email', async (req, res) => {
+    try {
+        const email = req.params.email;
+        const user = await userCollection.findOne({ email });
+
+        if (user) {
+            res.send({ role: user.role });
+        } else {
+            res.status(404).send({ message: "User not found" });
+        }
+    } catch (error) {
+        console.error(error);
+        res.status(500).send({ message: "Internal server error" });
+    }
+});
+
     app.post('/users', async (req, res) => {
       const user = req.body;
       const query = {email: user.email}
