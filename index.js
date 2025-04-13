@@ -89,6 +89,22 @@ async function run() {
       res.send(result);
     });
 
+    // update user photo
+    // Express.js backend
+app.put('/users/:email', async (req, res) => {
+  const email = req.params.email;
+  const updatedData = req.body;
+  
+  const result = await userCollection.updateOne(
+    { email },
+    { $set: updatedData },
+    { upsert: true }
+  );
+
+  res.send(result);
+});
+
+
     app.get("/tutorRequests", async (req, res) => {
       const result = await tutorRequestCollection.find().toArray();
       res.send(result);
