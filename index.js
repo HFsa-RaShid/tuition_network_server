@@ -3,6 +3,8 @@ require("dotenv").config();
 const cors = require("cors");
 const jwt = require("jsonwebtoken");
 const app = express();
+const { ObjectId } = require('mongodb');
+
 const port = process.env.PORT || 5000;
 
 app.use(express.json());
@@ -57,9 +59,33 @@ async function run() {
       });
     };
 
-    app.get("/users", async (req, res) => {
+    const verifyAdmin = async (req, res, next) => {
+      const email = req.decoded.email;
+      const query = { email: email };
+      const user = await userCollection.findOne(query);
+      const isAdmin = user?.role === "admin";
+      if (!isAdmin) {
+        return res.status(403).send({ message: "forbidden access" });
+      }
+      next();
+    };
+
+    app.get("/users", verifyToken, verifyAdmin, async (req, res) => {
       const users = await userCollection.find().toArray();
       res.send(users);
+    });
+
+    app.put("/users/:email", verifyToken, async (req, res) => {
+      const email = req.params.email;
+      const updatedData = req.body;
+
+      const result = await userCollection.updateOne(
+        { email },
+        { $set: updatedData },
+        { upsert: true }
+      );
+
+      res.send(result);
     });
 
     app.get("/users/:email", async (req, res) => {
@@ -77,6 +103,7 @@ async function run() {
         res.status(500).send({ message: "Internal server error" });
       }
     });
+
     // Post new user
     app.post("/users", async (req, res) => {
       const user = req.body;
@@ -89,26 +116,77 @@ async function run() {
       res.send(result);
     });
 
-    // update user photo
-    // Express.js backend
-app.put('/users/:email', async (req, res) => {
-  const email = req.params.email;
-  const updatedData = req.body;
-  
-  const result = await userCollection.updateOne(
-    { email },
-    { $set: updatedData },
-    { upsert: true }
-  );
+    // delete user by admin
+    app.delete("/users/:email", verifyToken, verifyAdmin, async (req, res) => {
+      const email = req.params.email;
+      const result = await userCollection.deleteOne({ email });
+      res.send(result);
+    });
 
-  res.send(result);
-});
+    // get users by search
+    app.get("/searchUsers", async (req, res) => {
+      const searchTerm = req.query.q.toLowerCase();
+      const users = await userCollection
+        .find({
+          role: { $ne: "admin" },
+          $or: [
+            { name: { $regex: searchTerm, $options: "i" } },
+            { email: { $regex: searchTerm, $options: "i" } },
+          ],
+        })
+        .toArray();
+      res.send(users);
+    });
+
+   
 
 
+    // get all tutor requests
     app.get("/tutorRequests", async (req, res) => {
       const result = await tutorRequestCollection.find().toArray();
       res.send(result);
     });
+
+
+
+    app.put("/tutorRequests/:id", async (req, res) => {
+      const id = req.params.id;
+      const { tutorDetails } = req.body;
+    
+      try {
+        const result = await tutorRequestCollection.updateOne(
+          { _id: new ObjectId(id) },
+          {
+            $set: {
+              status: "approved",
+              tutorDetails: tutorDetails,
+            },
+          }
+        );
+    
+        if (result.modifiedCount > 0) {
+          res.send({ message: "Request approved successfully." });
+        } else {
+          res.status(404).send({ message: "Request not found or not modified." });
+        }
+      } catch (error) {
+        console.error("Approval error:", error);
+        res.status(500).send({ message: "Failed to approve request." });
+      }
+    });
+
+     // delete tutor request by admin
+     app.delete('/tutorRequests/:id', async (req, res) => {
+      const id = req.params.id;
+      try {
+        const result = await tutorRequestCollection.deleteOne({ _id: new ObjectId(id) });
+        res.send(result);
+      } catch (error) {
+        console.error('Error deleting job:', error);
+        res.status(500).send({ error: 'Failed to delete job' });
+      }
+    });
+    
 
     // Post tutor request
     app.post("/tutorRequests", async (req, res) => {
