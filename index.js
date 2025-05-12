@@ -148,32 +148,60 @@ async function run() {
     });
 
 
+    // approve and apply jobs ,update tutor requests 
 
-    app.put("/tutorRequests/:id", async (req, res) => {
-      const id = req.params.id;
-      const { tutorDetails } = req.body;
-    
-      try {
-        const result = await tutorRequestCollection.updateOne(
-          { _id: new ObjectId(id) },
-          {
-            $set: {
-              status: "approved",
-              tutorDetails: tutorDetails,
-            },
-          }
-        );
-    
-        if (result.modifiedCount > 0) {
-          res.send({ message: "Request approved successfully." });
-        } else {
-          res.status(404).send({ message: "Request not found or not modified." });
-        }
-      } catch (error) {
-        console.error("Approval error:", error);
-        res.status(500).send({ message: "Failed to approve request." });
+app.put("/tutorRequests/:id", async (req, res) => {
+  const { id } = req.params;
+  const { email, tutorDetails, status } = req.body;
+
+  try {
+    let result;
+
+    // Applying for a tutor request
+    if (email) {
+      result = await tutorRequestCollection.updateOne(
+        { _id: new ObjectId(id) },
+        { $addToSet: { appliedTutors: email } }
+      );
+
+      if (result.modifiedCount > 0) {
+        return res.send({ message: "Applied successfully." });
+      } else {
+        // Checking if the user already applied or the request was not found
+        return res.status(400).send({ message: "Already applied or request not found." });
       }
-    });
+    }
+
+    // Updating tutor details or changing request status
+    if (tutorDetails || status === "approved") {
+      const updateFields = {};
+      if (status) updateFields.status = status;
+      if (tutorDetails) updateFields.tutorDetails = tutorDetails;
+
+      result = await tutorRequestCollection.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: updateFields }
+      );
+
+      if (result.modifiedCount > 0) {
+        return res.send({ message: "Request updated successfully." });
+      } else {
+        return res.status(404).send({ message: "Request not found or not modified." });
+      }
+    }
+
+    // If no valid fields provided
+    return res.status(400).send({ message: "Nothing to update. Provide valid fields." });
+
+  } catch (error) {
+    // Log the detailed error and send a generic message to the client
+    console.error("Error in PUT /tutorRequests/:id:", error);
+    return res.status(500).send({ message: "Server error. Please try again later." });
+  }
+});
+
+
+
 
      // delete tutor request by admin
      app.delete('/tutorRequests/:id', async (req, res) => {
