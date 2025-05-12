@@ -150,12 +150,24 @@ async function run() {
 
     // approve and apply jobs ,update tutor requests 
 
-app.put("/tutorRequests/:id", async (req, res) => {
+app.put("/tutorRequests/:id",verifyToken, async (req, res) => {
   const { id } = req.params;
-  const { email, tutorDetails, status } = req.body;
+  const { email, tutorDetails, status,tutorStatus } = req.body;
 
   try {
     let result;
+    if(tutorStatus){
+      result = await tutorRequestCollection.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: { tutorStatus } }
+      );
+
+      if (result.modifiedCount > 0) {
+        return res.send({ message: "Tutor status updated successfully." });
+      } else {
+        return res.status(404).send({ message: "Request not found or not modified." });
+      }
+    }
 
     // Applying for a tutor request
     if (email) {
