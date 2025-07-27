@@ -151,7 +151,7 @@ async function run() {
 
 
 
-
+//applied tutors name by email
     app.post("/users/by-emails", verifyToken, async (req, res) => {
   try {
     const emails = req.body.emails;  // Expect an array of emails
@@ -178,9 +178,6 @@ async function run() {
 app.put("/tutorRequests/:id",verifyToken, async (req, res) => {
   const { id } = req.params;
   const { email, tutorDetails, status,tutorStatus } = req.body;
-  if (!ObjectId.isValid(id)) {
-    return res.status(400).send({ message: "Invalid ID format" });
-  }
 
   try {
     let result;
@@ -239,6 +236,24 @@ app.put("/tutorRequests/:id",verifyToken, async (req, res) => {
     return res.status(500).send({ message: "Server error. Please try again later." });
   }
 });
+
+
+
+// GET tutor info by email
+app.get("/tutors/email/:email", async (req, res) => {
+  const email = req.params.email.toLowerCase();
+  try {
+    const tutor = await userCollection.findOne({ email: email });
+    if (!tutor) {
+      return res.status(404).send({ message: "Tutor not found" });
+    }
+    res.send(tutor);
+  } catch (error) {
+    console.error("Error fetching tutor:", error);
+    res.status(500).send({ message: "Internal server error" });
+  }
+});
+
 
 
 
