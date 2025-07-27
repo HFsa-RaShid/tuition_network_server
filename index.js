@@ -70,7 +70,8 @@ async function run() {
       next();
     };
 
-    app.get("/users", verifyToken, verifyAdmin, async (req, res) => {
+    app.get("/users",  async (req, res) => {
+      //varifytoken,admin
       const users = await userCollection.find().toArray();
       res.send(users);
     });
@@ -103,6 +104,7 @@ async function run() {
         res.status(500).send({ message: "Internal server error" });
       }
     });
+
 
     // Post new user
     app.post("/users", async (req, res) => {
@@ -148,11 +150,37 @@ async function run() {
     });
 
 
+
+
+    app.post("/users/by-emails", verifyToken, async (req, res) => {
+  try {
+    const emails = req.body.emails;  // Expect an array of emails
+    if (!Array.isArray(emails) || emails.length === 0) {
+      return res.status(400).send({ message: "emails must be a non-empty array" });
+    }
+
+    const users = await userCollection
+      .find({ email: { $in: emails } })
+      .project({ _id: 0, email: 1, name: 1 })  // Return only email and name
+      .toArray();
+
+    res.send(users);
+  } catch (error) {
+    console.error("Error in /users/by-emails:", error);
+    res.status(500).send({ message: "Server error fetching users by emails" });
+  }
+});
+
+
+
     // approve and apply jobs ,update tutor requests 
 
 app.put("/tutorRequests/:id",verifyToken, async (req, res) => {
   const { id } = req.params;
   const { email, tutorDetails, status,tutorStatus } = req.body;
+  if (!ObjectId.isValid(id)) {
+    return res.status(400).send({ message: "Invalid ID format" });
+  }
 
   try {
     let result;
@@ -211,6 +239,7 @@ app.put("/tutorRequests/:id",verifyToken, async (req, res) => {
     return res.status(500).send({ message: "Server error. Please try again later." });
   }
 });
+
 
 
 
