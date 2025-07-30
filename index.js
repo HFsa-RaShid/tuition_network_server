@@ -3,7 +3,7 @@ require("dotenv").config();
 const cors = require("cors");
 const jwt = require("jsonwebtoken");
 const app = express();
-const { ObjectId } = require('mongodb');
+const { ObjectId } = require("mongodb");
 
 const port = process.env.PORT || 5000;
 
@@ -70,7 +70,18 @@ async function run() {
       next();
     };
 
-    app.get("/users",  async (req, res) => {
+    const verifyStudent = async (req, res, next) => {
+      const email = req.decoded.email;
+      const query = { email: email };
+      const user = await userCollection.findOne(query);
+      const isStudent = user?.role === "student";
+      if (!isStudent) {
+        return res.status(403).send({ message: "forbidden access" });
+      }
+      next();
+    };
+
+    app.get("/users", verifyToken, verifyAdmin, async (req, res) => {
       //varifytoken,admin
       const users = await userCollection.find().toArray();
       res.send(users);
@@ -100,11 +111,9 @@ async function run() {
           res.status(404).send({ message: "User not found" });
         }
       } catch (error) {
-        console.error(error);
         res.status(500).send({ message: "Internal server error" });
       }
     });
-
 
     // Post new user
     app.post("/users", async (req, res) => {
@@ -140,140 +149,150 @@ async function run() {
       res.send(users);
     });
 
-   
-
-
     // get all tutor requests
     app.get("/tutorRequests", async (req, res) => {
       const result = await tutorRequestCollection.find().toArray();
       res.send(result);
     });
 
+    //applied tutors name by email
+    app.post(
+      "/users/by-emails",
+      verifyToken,
+      verifyStudent,
+      async (req, res) => {
+        try {
+          const emails = req.body.emails; // Expect an array of emails
+          if (!Array.isArray(emails) || emails.length === 0) {
+            return res
+              .status(400)
+              .send({ message: "emails must be a non-empty array" });
+          }
 
+          const users = await userCollection
+            .find({ email: { $in: emails } })
+            .project({ _id: 0, email: 1, name: 1 }) // Return only email and name
+            .toArray();
 
-//applied tutors name by email
-    app.post("/users/by-emails", verifyToken, async (req, res) => {
-  try {
-    const emails = req.body.emails;  // Expect an array of emails
-    if (!Array.isArray(emails) || emails.length === 0) {
-      return res.status(400).send({ message: "emails must be a non-empty array" });
-    }
-
-    const users = await userCollection
-      .find({ email: { $in: emails } })
-      .project({ _id: 0, email: 1, name: 1 })  // Return only email and name
-      .toArray();
-
-    res.send(users);
-  } catch (error) {
-    console.error("Error in /users/by-emails:", error);
-    res.status(500).send({ message: "Server error fetching users by emails" });
-  }
-});
-
-
-
-    // approve and apply jobs ,update tutor requests 
-
-app.put("/tutorRequests/:id",verifyToken, async (req, res) => {
-  const { id } = req.params;
-  const { email, tutorDetails, status,tutorStatus } = req.body;
-
-  try {
-    let result;
-    if(tutorStatus){
-      result = await tutorRequestCollection.updateOne(
-        { _id: new ObjectId(id) },
-        { $set: { tutorStatus } }
-      );
-
-      if (result.modifiedCount > 0) {
-        return res.send({ message: "Tutor status updated successfully." });
-      } else {
-        return res.status(404).send({ message: "Request not found or not modified." });
+          res.send(users);
+        } catch (error) {
+          console.error("Error in /users/by-emails:", error);
+          res
+            .status(500)
+            .send({ message: "Server error fetching users by emails" });
+        }
       }
-    }
+    );
 
-    // Applying for a tutor request
-    if (email) {
-      result = await tutorRequestCollection.updateOne(
-        { _id: new ObjectId(id) },
-        { $addToSet: { appliedTutors: email } }
-      );
+    // approve and apply jobs ,update tutor requests
 
-      if (result.modifiedCount > 0) {
-        return res.send({ message: "Applied successfully." });
-      } else {
-        // Checking if the user already applied or the request was not found
-        return res.status(400).send({ message: "Already applied or request not found." });
-      }
-    }
+    app.put("/tutorRequests/:id", verifyToken, async (req, res) => {
+      const { id } = req.params;
+      const { email, tutorDetails, status, tutorStatus } = req.body;
 
-    // Updating tutor details or changing request status
-    if (tutorDetails || status === "approved") {
-      const updateFields = {};
-      if (status) updateFields.status = status;
-      if (tutorDetails) updateFields.tutorDetails = tutorDetails;
-
-      result = await tutorRequestCollection.updateOne(
-        { _id: new ObjectId(id) },
-        { $set: updateFields }
-      );
-
-      if (result.modifiedCount > 0) {
-        return res.send({ message: "Request updated successfully." });
-      } else {
-        return res.status(404).send({ message: "Request not found or not modified." });
-      }
-    }
-
-    // If no valid fields provided
-    return res.status(400).send({ message: "Nothing to update. Provide valid fields." });
-
-  } catch (error) {
-    // Log the detailed error and send a generic message to the client
-    console.error("Error in PUT /tutorRequests/:id:", error);
-    return res.status(500).send({ message: "Server error. Please try again later." });
-  }
-});
-
-
-
-// GET tutor info by email
-app.get("/tutors/email/:email", async (req, res) => {
-  const email = req.params.email.toLowerCase();
-  try {
-    const tutor = await userCollection.findOne({ email: email });
-    if (!tutor) {
-      return res.status(404).send({ message: "Tutor not found" });
-    }
-    res.send(tutor);
-  } catch (error) {
-    console.error("Error fetching tutor:", error);
-    res.status(500).send({ message: "Internal server error" });
-  }
-});
-
-
-
-
-
-
-     // delete tutor request by admin
-     app.delete('/tutorRequests/:id', async (req, res) => {
-      const id = req.params.id;
       try {
-        const result = await tutorRequestCollection.deleteOne({ _id: new ObjectId(id) });
-        res.send(result);
+        let result;
+        if (tutorStatus) {
+          result = await tutorRequestCollection.updateOne(
+            { _id: new ObjectId(id) },
+            { $set: { tutorStatus } }
+          );
+
+          if (result.modifiedCount > 0) {
+            return res.send({ message: "Tutor status updated successfully." });
+          } else {
+            return res
+              .status(404)
+              .send({ message: "Request not found or not modified." });
+          }
+        }
+
+        // Applying for a tutor request
+
+        if (email) {
+          const applyObject = {
+            email,
+            appliedAt: new Date(),
+          };
+
+          result = await tutorRequestCollection.updateOne(
+            { _id: new ObjectId(id), "appliedTutors.email": { $ne: email } },
+            { $push: { appliedTutors: applyObject } }
+          );
+
+          if (result.modifiedCount > 0) {
+            return res.send({ message: "Applied successfully." });
+          } else {
+            return res
+              .status(400)
+              .send({ message: "Already applied or request not found." });
+          }
+        }
+
+        // Updating tutor details or changing request status
+        if (tutorDetails || status === "approved") {
+          const updateFields = {};
+          if (status) updateFields.status = status;
+          if (tutorDetails) updateFields.tutorDetails = tutorDetails;
+
+          result = await tutorRequestCollection.updateOne(
+            { _id: new ObjectId(id) },
+            { $set: updateFields }
+          );
+
+          if (result.modifiedCount > 0) {
+            return res.send({ message: "Request updated successfully." });
+          } else {
+            return res
+              .status(404)
+              .send({ message: "Request not found or not modified." });
+          }
+        }
+
+        // If no valid fields provided
+        return res
+          .status(400)
+          .send({ message: "Nothing to update. Provide valid fields." });
       } catch (error) {
-        console.error('Error deleting job:', error);
-        res.status(500).send({ error: 'Failed to delete job' });
+        // Log the detailed error and send a generic message to the client
+        console.error("Error in PUT /tutorRequests/:id:", error);
+        return res
+          .status(500)
+          .send({ message: "Server error. Please try again later." });
       }
     });
-    
+
+    // GET tutor info by email
+    app.get("/tutors/email/:email", async (req, res) => {
+      const email = req.params.email.toLowerCase();
+      try {
+        const tutor = await userCollection.findOne({ email: email });
+        if (!tutor) {
+          return res.status(404).send({ message: "Tutor not found" });
+        }
+        res.send(tutor);
+      } catch (error) {
+        console.error("Error fetching tutor:", error);
+        res.status(500).send({ message: "Internal server error" });
+      }
+    });
+
+    // delete tutor request by admin
+    app.delete("/tutorRequests/:id", async (req, res) => {
+      const id = req.params.id;
+      try {
+        const result = await tutorRequestCollection.deleteOne({
+          _id: new ObjectId(id),
+        });
+        res.send(result);
+      } catch (error) {
+        console.error("Error deleting job:", error);
+        res.status(500).send({ error: "Failed to delete job" });
+      }
+    });
 
     // Post tutor request
-    app.post("/tutorRequests", async (req, res) => {
+    app.post("/tutorRequests", verifyToken, verifyStudent, async (req, res) => {
       try {
         const tutorRequest = req.body;
         const result = await tutorRequestCollection.insertOne(tutorRequest);
