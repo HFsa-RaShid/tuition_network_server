@@ -81,7 +81,7 @@ async function run() {
       next();
     };
 
-    app.get("/users", verifyToken, verifyAdmin, async (req, res) => {
+    app.get("/users", async (req, res) => {
       //varifytoken,admin
       const users = await userCollection.find().toArray();
       res.send(users);
@@ -149,46 +149,35 @@ async function run() {
       res.send(users);
     });
 
+
+
+     // Post tutor request
+    app.post("/tutorRequests", verifyToken, async (req, res) => {
+      try {
+        const tutorRequest = req.body;
+        const result = await tutorRequestCollection.insertOne(tutorRequest);
+        res.status(201).send({
+          message: "Tutor request submitted successfully",
+          insertedId: result.insertedId,
+        });
+      } catch (error) {
+        console.error(error);
+        res.status(500).send({ message: "Error submitting tutor request" });
+      }
+    });
+
     // get all tutor requests
     app.get("/tutorRequests", async (req, res) => {
       const result = await tutorRequestCollection.find().toArray();
       res.send(result);
     });
 
-    //applied tutors name by email
-    app.post(
-      "/users/by-emails",
-      verifyToken,
-      verifyStudent,
-      async (req, res) => {
-        try {
-          const emails = req.body.emails; // Expect an array of emails
-          if (!Array.isArray(emails) || emails.length === 0) {
-            return res
-              .status(400)
-              .send({ message: "emails must be a non-empty array" });
-          }
-
-          const users = await userCollection
-            .find({ email: { $in: emails } })
-            .project({ _id: 0, email: 1, name: 1 }) // Return only email and name
-            .toArray();
-
-          res.send(users);
-        } catch (error) {
-          console.error("Error in /users/by-emails:", error);
-          res
-            .status(500)
-            .send({ message: "Server error fetching users by emails" });
-        }
-      }
-    );
 
     // approve and apply jobs ,update tutor requests
 
     app.put("/tutorRequests/:id", verifyToken, async (req, res) => {
       const { id } = req.params;
-      const { email, tutorDetails, status, tutorStatus } = req.body;
+      const { email,name, tutorDetails, status, tutorStatus } = req.body;
 
       try {
         let result;
@@ -212,6 +201,7 @@ async function run() {
         if (email) {
           const applyObject = {
             email,
+            name,
             appliedAt: new Date(),
           };
 
@@ -230,24 +220,78 @@ async function run() {
         }
 
         // Updating tutor details or changing request status
-        if (tutorDetails || status === "approved") {
-          const updateFields = {};
-          if (status) updateFields.status = status;
-          if (tutorDetails) updateFields.tutorDetails = tutorDetails;
+//         if (tutorStatus !== undefined) {
+//   let updateQuery;
 
-          result = await tutorRequestCollection.updateOne(
-            { _id: new ObjectId(id) },
-            { $set: updateFields }
-          );
+//   // If the frontend sent empty string: unset the field
+//   if (tutorStatus === "") {
+//     updateQuery = { $unset: { tutorStatus: "" } };
+//   } else {
+//     updateQuery = { $set: { tutorStatus } };
+//   }
 
-          if (result.modifiedCount > 0) {
-            return res.send({ message: "Request updated successfully." });
-          } else {
-            return res
-              .status(404)
-              .send({ message: "Request not found or not modified." });
-          }
-        }
+//   result = await tutorRequestCollection.updateOne(
+//     { _id: new ObjectId(id) },
+//     updateQuery
+//   );
+
+//   if (result.modifiedCount > 0) {
+//     return res.send({ message: "Tutor status updated successfully." });
+//   } else {
+//     return res
+//       .status(404)
+//       .send({ message: "Request not found or not modified." });
+//   }
+// }
+// Updating tutor request status by admin
+if (status !== undefined) {
+  let updateQuery;
+
+  if (status === "") {
+    updateQuery = { $unset: { status: "" } };
+  } else {
+    updateQuery = { $set: { status } };
+  }
+
+  result = await tutorRequestCollection.updateOne(
+    { _id: new ObjectId(id) },
+    updateQuery
+  );
+
+  if (result.modifiedCount > 0) {
+    return res.send({ message: "Status updated successfully." });
+  } else {
+    return res
+      .status(404)
+      .send({ message: "Request not found or not modified." });
+  }
+}
+
+// Updating tutor details or changing request status
+if (tutorStatus !== undefined) {
+  let updateQuery;
+
+  // If the frontend sent empty string: unset the field
+  if (tutorStatus === "") {
+    updateQuery = { $unset: { tutorStatus: "" } };
+  } else {
+    updateQuery = { $set: { tutorStatus } };
+  }
+
+  result = await tutorRequestCollection.updateOne(
+    { _id: new ObjectId(id) },
+    updateQuery
+  );
+
+  if (result.modifiedCount > 0) {
+    return res.send({ message: "Tutor status updated successfully." });
+  } else {
+    return res
+      .status(404)
+      .send({ message: "Request not found or not modified." });
+  }
+}
+
 
         // If no valid fields provided
         return res
@@ -291,20 +335,7 @@ async function run() {
       }
     });
 
-    // Post tutor request
-    app.post("/tutorRequests", verifyToken, verifyStudent, async (req, res) => {
-      try {
-        const tutorRequest = req.body;
-        const result = await tutorRequestCollection.insertOne(tutorRequest);
-        res.status(201).send({
-          message: "Tutor request submitted successfully",
-          insertedId: result.insertedId,
-        });
-      } catch (error) {
-        console.error(error);
-        res.status(500).send({ message: "Error submitting tutor request" });
-      }
-    });
+   
 
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
