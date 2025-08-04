@@ -149,9 +149,7 @@ async function run() {
       res.send(users);
     });
 
-
-
-     // Post tutor request
+    // Post tutor request
     app.post("/tutorRequests", verifyToken, async (req, res) => {
       try {
         const tutorRequest = req.body;
@@ -172,12 +170,11 @@ async function run() {
       res.send(result);
     });
 
-
     // approve and apply jobs ,update tutor requests
 
-    app.put("/tutorRequests/:id", verifyToken, async (req, res) => {
+    app.put("/tutorRequests/:id", async (req, res) => {
       const { id } = req.params;
-      const { email,name, tutorDetails, status, tutorStatus } = req.body;
+      const { email, name, tutorDetails, status, tutorStatus } = req.body;
 
       try {
         let result;
@@ -218,79 +215,111 @@ async function run() {
               .send({ message: "Already applied or request not found." });
           }
         }
+        // Updating tutor request status by admin
+        if (status !== undefined) {
+          let updateQuery;
+
+          if (status === "") {
+            updateQuery = { $unset: { status: "" } };
+          } else {
+            updateQuery = { $set: { status } };
+          }
+
+          result = await tutorRequestCollection.updateOne(
+            { _id: new ObjectId(id) },
+            updateQuery
+          );
+
+          if (result.modifiedCount > 0) {
+            return res.send({ message: "Status updated successfully." });
+          } else {
+            return res
+              .status(404)
+              .send({ message: "Request not found or not modified." });
+          }
+        }
 
         // Updating tutor details or changing request status
-//         if (tutorStatus !== undefined) {
-//   let updateQuery;
+        if (tutorStatus !== undefined) {
+          let updateQuery;
 
-//   // If the frontend sent empty string: unset the field
-//   if (tutorStatus === "") {
-//     updateQuery = { $unset: { tutorStatus: "" } };
-//   } else {
-//     updateQuery = { $set: { tutorStatus } };
-//   }
+          // If the frontend sent empty string: unset the field
+          if (tutorStatus === "") {
+            updateQuery = { $unset: { tutorStatus: "" } };
+          } else {
+            updateQuery = { $set: { tutorStatus } };
+          }
 
-//   result = await tutorRequestCollection.updateOne(
-//     { _id: new ObjectId(id) },
-//     updateQuery
-//   );
+          result = await tutorRequestCollection.updateOne(
+            { _id: new ObjectId(id) },
+            updateQuery
+          );
 
-//   if (result.modifiedCount > 0) {
-//     return res.send({ message: "Tutor status updated successfully." });
-//   } else {
-//     return res
-//       .status(404)
-//       .send({ message: "Request not found or not modified." });
-//   }
-// }
-// Updating tutor request status by admin
-if (status !== undefined) {
-  let updateQuery;
+          if (result.modifiedCount > 0) {
+            return res.send({ message: "Tutor status updated successfully." });
+          } else {
+            return res
+              .status(404)
+              .send({ message: "Request not found or not modified." });
+          }
+        }
 
-  if (status === "") {
-    updateQuery = { $unset: { status: "" } };
-  } else {
-    updateQuery = { $set: { status } };
+        // Confirming a tutor
+if (req.body.confirmedTutorEmail) {
+  const { confirmedTutorEmail } = req.body;
+
+  // First, fetch the current tutor request
+  const tutorRequest = await tutorRequestCollection.findOne({ _id: new ObjectId(id) });
+
+  if (!tutorRequest) {
+    return res.status(404).send({ message: "Tutor request not found." });
   }
+
+  const updatedTutors = tutorRequest.appliedTutors.map((tutor) => {
+    if (tutor.email === confirmedTutorEmail) {
+      return { ...tutor, confirmationStatus: "confirmed" };
+    } else {
+      const { confirmationStatus, ...rest } = tutor;
+      return rest; // remove confirmationStatus if exists
+    }
+  });
 
   result = await tutorRequestCollection.updateOne(
     { _id: new ObjectId(id) },
-    updateQuery
+    { $set: { appliedTutors: updatedTutors } }
   );
 
   if (result.modifiedCount > 0) {
-    return res.send({ message: "Status updated successfully." });
+    return res.send({ message: "Tutor confirmed successfully." });
   } else {
-    return res
-      .status(404)
-      .send({ message: "Request not found or not modified." });
+    return res.status(400).send({ message: "Failed to confirm tutor." });
   }
 }
 
-// Updating tutor details or changing request status
-if (tutorStatus !== undefined) {
-  let updateQuery;
+// Canceling a tutor confirmation
+if (req.body.cancelConfirmation) {
+  // Find the tutor request
+  const tutorRequest = await tutorRequestCollection.findOne({ _id: new ObjectId(id) });
 
-  // If the frontend sent empty string: unset the field
-  if (tutorStatus === "") {
-    updateQuery = { $unset: { tutorStatus: "" } };
-  } else {
-    updateQuery = { $set: { tutorStatus } };
+  if (!tutorRequest) {
+    return res.status(404).send({ message: "Tutor request not found." });
   }
+
+  // Remove confirmationStatus from all tutors
+  const updatedTutors = tutorRequest.appliedTutors.map(({ confirmationStatus, ...rest }) => rest);
 
   result = await tutorRequestCollection.updateOne(
     { _id: new ObjectId(id) },
-    updateQuery
+    { $set: { appliedTutors: updatedTutors } }
   );
 
   if (result.modifiedCount > 0) {
-    return res.send({ message: "Tutor status updated successfully." });
+    return res.send({ message: "Tutor confirmation cancelled successfully." });
   } else {
-    return res
-      .status(404)
-      .send({ message: "Request not found or not modified." });
+    return res.status(400).send({ message: "Failed to cancel confirmation." });
   }
 }
+
 
 
         // If no valid fields provided
@@ -334,8 +363,6 @@ if (tutorStatus !== undefined) {
         res.status(500).send({ error: "Failed to delete job" });
       }
     });
-
-   
 
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
