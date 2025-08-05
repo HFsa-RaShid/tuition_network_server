@@ -1,6 +1,7 @@
 const express = require("express");
 require("dotenv").config();
 const cors = require("cors");
+const SSLCommerzPayment = require('sslcommerz-lts')
 const jwt = require("jsonwebtoken");
 const app = express();
 const { ObjectId } = require("mongodb");
@@ -22,15 +23,19 @@ const client = new MongoClient(uri, {
   },
 });
 
+
+const store_id = process.env.STORE_ID;
+const store_passwd = process.env.STORE_PASSWD;
+const is_live = false //true for live, false for sandbox
+
+
 async function run() {
   try {
     // Connect the client to the server	(optional starting in v4.7)
     // await client.connect();
     const userCollection = client.db("tuitionNetworkDB").collection("users");
-    const tutorRequestCollection = client
-      .db("tuitionNetworkDB")
-      .collection("tutorRequests");
-
+    const tutorRequestCollection = client.db("tuitionNetworkDB").collection("tutorRequests");
+    const paymentCollection = client.db("tuitionNetworkDB").collection("payments");
     // auth related api
     app.post("/jwt", async (req, res) => {
       const user = req.body;
@@ -363,6 +368,95 @@ if (req.body.cancelConfirmation) {
         res.status(500).send({ error: "Failed to delete job" });
       }
     });
+
+
+    //payment related api
+    
+    app.post("/paymentBkash", async (req, res) => {
+      const { jobId,name, email } = req.body;
+      const tran_id = new ObjectId().toString();
+     
+    const data = {
+       
+        total_amount: 100, 
+        currency: 'BDT',  
+        tran_id: tran_id, 
+        success_url: `http://localhost:5000/myApplications/payment/success/${tran_id}`, // URL to redirect on
+        fail_url: 'http://localhost:5000/paymentFail', // URL to redirect on failure
+        cancel_url: 'http://localhost:5000/paymentCancel', // URL to redirect on
+        ipn_url: 'http://localhost:5000/ipn', // URL for Instant Payment Notification
+        shipping_method: 'Courier',
+        product_name: 'Tuition Payment', 
+        product_category: 'Tuition', 
+        product_profile: 'general', 
+        cus_name: name,
+        cus_email: email, 
+        cus_add1: 'Dhaka',
+        cus_add2: 'Dhaka',
+        cus_city: 'Dhaka',
+        cus_state: 'Dhaka',
+        cus_postcode: '1000',
+        cus_country: 'Bangladesh',
+        cus_phone: '01711111111',
+        cus_fax: '01711111111',
+        ship_name: 'Customer Name',
+        ship_add1: 'Dhaka',
+        ship_add2: 'Dhaka',
+        ship_city: 'Dhaka',
+        ship_state: 'Dhaka',
+        ship_postcode: 1000,
+        ship_country: 'Bangladesh',
+        
+    };
+    const sslcz = new SSLCommerzPayment(store_id, store_passwd, is_live)
+    sslcz.init(data).then(apiResponse => {
+        // Redirect the user to payment gateway
+        let GatewayPageURL = apiResponse.GatewayPageURL
+        res.send({ url: GatewayPageURL });
+
+        const finalPayment = {
+          jobId: jobId,
+          transactionId: tran_id,
+          amount: 100,
+          email: email,
+          name: name,
+          paidStatus: false,
+          paymentTime: new Date(),
+        };
+        const result = paymentCollection.insertOne(finalPayment);
+        // console.log('Redirecting to: ', GatewayPageURL)
+    });
+    app.post("/myApplications/payment/success/:tranId", async (req, res) => {
+      // console.log("Payment successful for transaction ID:", req.params.tranId);
+      const result = await paymentCollection.updateOne(
+        { transactionId: req.params.tranId },
+        { $set: { paidStatus: true } }
+      );
+
+      if (result.modifiedCount > 0) {
+        res.redirect(`http://localhost:5173/tutor/myApplications/payment/success/${req.params.tranId}`);
+      } 
+    });
+});
+
+app.get('/myApplications/payment/success/:tranId', async (req, res) => {
+  const tranId = req.params.tranId;
+
+  try {
+    const payment = await paymentCollection.findOne({ transactionId: tranId });
+
+    if (!payment) {
+      return res.status(404).json({ message: 'Payment not found' });
+    }
+
+    res.status(200).json(payment);
+  } catch (error) {
+    console.error('Error fetching payment:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+
 
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
