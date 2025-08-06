@@ -176,7 +176,6 @@ async function run() {
     });
 
     // approve and apply jobs ,update tutor requests
-
     app.put("/tutorRequests/:id", async (req, res) => {
       const { id } = req.params;
       const { email, name, tutorDetails, status, tutorStatus } = req.body;
@@ -325,8 +324,6 @@ if (req.body.cancelConfirmation) {
   }
 }
 
-
-
         // If no valid fields provided
         return res
           .status(400)
@@ -382,7 +379,7 @@ if (req.body.cancelConfirmation) {
         currency: 'BDT',  
         tran_id: tran_id, 
         success_url: `http://localhost:5000/myApplications/payment/success/${tran_id}`, // URL to redirect on
-        fail_url: 'http://localhost:5000/paymentFail', // URL to redirect on failure
+        fail_url: `http://localhost:5000/myApplications/payment/fail/${tran_id}`, // URL to redirect on failure
         cancel_url: 'http://localhost:5000/paymentCancel', // URL to redirect on
         ipn_url: 'http://localhost:5000/ipn', // URL for Instant Payment Notification
         shipping_method: 'Courier',
@@ -437,6 +434,13 @@ if (req.body.cancelConfirmation) {
         res.redirect(`http://localhost:5173/tutor/myApplications/payment/success/${req.params.tranId}`);
       } 
     });
+    app.post("/myApplications/payment/fail/:tranId", async (req, res) => {
+      const result = await paymentCollection.deleteOne({ transactionId: req.params.tranId });
+      if (result.deletedCount) {
+        res.redirect('http://localhost:5173/tutor/myApplications');
+      } 
+    })
+    
 });
 
 app.get('/myApplications/payment/success/:tranId', async (req, res) => {
@@ -456,6 +460,32 @@ app.get('/myApplications/payment/success/:tranId', async (req, res) => {
   }
 });
 
+//Get all paid jobs for a user
+
+app.get("/user/paidJobs/:email", async (req, res) => {
+  const email = req.params.email;
+
+  const payments = await paymentCollection
+    .find({ email, paidStatus: true })
+    .toArray();
+
+  const paidJobIds = payments.map((p) => new ObjectId(p.jobId));
+
+  const jobs = await tutorRequestCollection
+    .find({ _id: { $in: paidJobIds } })
+    .toArray();
+
+  // Merge payment info with job info
+  const merged = payments.map((payment) => {
+    const job = jobs.find((j) => j._id.toString() === payment.jobId);
+    return {
+      ...payment,
+      jobDetails: job || null,
+    };
+  });
+
+  res.send(merged);
+});
 
 
     // Send a ping to confirm a successful connection
