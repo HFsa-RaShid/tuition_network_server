@@ -338,7 +338,7 @@ if (req.body.cancelConfirmation) {
     });
 
     // GET tutor info by email
-    app.get("/tutors/email/:email", async (req, res) => {
+    app.get("/appliedTutors/:email", async (req, res) => {
       const email = req.params.email.toLowerCase();
       try {
         const tutor = await userCollection.findOne({ email: email });
@@ -368,82 +368,97 @@ if (req.body.cancelConfirmation) {
 
 
     //payment related api
-    
-    app.post("/paymentBkash", async (req, res) => {
-      const { jobId,name, email } = req.body;
-      const tran_id = new ObjectId().toString();
-     
-    const data = {
-       
-        total_amount: 100, 
-        currency: 'BDT',  
-        tran_id: tran_id, 
-        success_url: `http://localhost:5000/myApplications/payment/success/${tran_id}`, // URL to redirect on
-        fail_url: `http://localhost:5000/myApplications/payment/fail/${tran_id}`, // URL to redirect on failure
-        cancel_url: 'http://localhost:5000/paymentCancel', // URL to redirect on
-        ipn_url: 'http://localhost:5000/ipn', // URL for Instant Payment Notification
-        shipping_method: 'Courier',
-        product_name: 'Tuition Payment', 
-        product_category: 'Tuition', 
-        product_profile: 'general', 
-        cus_name: name,
-        cus_email: email, 
-        cus_add1: 'Dhaka',
-        cus_add2: 'Dhaka',
-        cus_city: 'Dhaka',
-        cus_state: 'Dhaka',
-        cus_postcode: '1000',
-        cus_country: 'Bangladesh',
-        cus_phone: '01711111111',
-        cus_fax: '01711111111',
-        ship_name: 'Customer Name',
-        ship_add1: 'Dhaka',
-        ship_add2: 'Dhaka',
-        ship_city: 'Dhaka',
-        ship_state: 'Dhaka',
-        ship_postcode: 1000,
-        ship_country: 'Bangladesh',
-        
-    };
-    const sslcz = new SSLCommerzPayment(store_id, store_passwd, is_live)
-    sslcz.init(data).then(apiResponse => {
-        // Redirect the user to payment gateway
-        let GatewayPageURL = apiResponse.GatewayPageURL
-        res.send({ url: GatewayPageURL });
 
-        const finalPayment = {
-          jobId: jobId,
-          transactionId: tran_id,
-          amount: 100,
-          email: email,
-          name: name,
-          paidStatus: false,
-          paymentTime: new Date(),
-        };
-        const result = paymentCollection.insertOne(finalPayment);
-        // console.log('Redirecting to: ', GatewayPageURL)
-    });
-    app.post("/myApplications/payment/success/:tranId", async (req, res) => {
-      // console.log("Payment successful for transaction ID:", req.params.tranId);
-      const result = await paymentCollection.updateOne(
-        { transactionId: req.params.tranId },
-        { $set: { paidStatus: true } }
-      );
+app.post("/paymentBkash", async (req, res) => {
+  const { jobId, name, email, amount, source, productName = "Tuition Payment" } = req.body;
+  const tran_id = new ObjectId().toString();
 
-      if (result.modifiedCount > 0) {
-        res.redirect(`http://localhost:5173/tutor/myApplications/payment/success/${req.params.tranId}`);
-      } 
+  const data = {
+    total_amount: amount,
+    currency: "BDT",
+    tran_id,
+    success_url: `http://localhost:5000/payment/success/${tran_id}`,
+    fail_url: `http://localhost:5000/payment/fail/${tran_id}`,
+    cancel_url: `http://localhost:5000/paymentCancel`,
+    ipn_url: `http://localhost:5000/ipn`,
+    shipping_method: "Courier",
+    product_name: productName,
+    product_category: "Tuition",
+    product_profile: "general",
+    cus_name: name,
+    cus_email: email,
+    cus_add1: "Dhaka",
+    cus_add2: "Dhaka",
+    cus_city: "Dhaka",
+    cus_state: "Dhaka",
+    cus_postcode: "1000",
+    cus_country: "Bangladesh",
+    cus_phone: "01711111111",
+    cus_fax: "01711111111",
+    ship_name: "Customer Name",
+    ship_add1: "Dhaka",
+    ship_add2: "Dhaka",
+    ship_city: "Dhaka",
+    ship_state: "Dhaka",
+    ship_postcode: 1000,
+    ship_country: "Bangladesh",
+  };
+
+  const sslcz = new SSLCommerzPayment(store_id, store_passwd, is_live);
+  sslcz.init(data).then(apiResponse => {
+    res.send({ url: apiResponse.GatewayPageURL });
+
+    paymentCollection.insertOne({
+      jobId,
+      transactionId: tran_id,
+      amount,
+      email,
+      name,
+      source, 
+      paidStatus: false,
+      paymentTime: new Date(),
     });
-    app.post("/myApplications/payment/fail/:tranId", async (req, res) => {
-      const result = await paymentCollection.deleteOne({ transactionId: req.params.tranId });
-      if (result.deletedCount) {
-        res.redirect('http://localhost:5173/tutor/myApplications');
-      } 
-    })
-    
+  });
+});
+// SUCCESS Route (Dynamic redirect)
+app.post("/payment/success/:tranId", async (req, res) => {
+  const payment = await paymentCollection.findOne({ transactionId: req.params.tranId });
+
+  if (!payment) {
+    return res.status(404).send("Payment not found");
+  }
+
+  await paymentCollection.updateOne(
+    { transactionId: req.params.tranId },
+    { $set: { paidStatus: true } }
+  );
+
+  if (payment.source === "myApplications") {
+    res.redirect(`http://localhost:5173/tutor/payment/success/${req.params.tranId}`);
+  } else if (payment.source === "appliedTutors") {
+    res.redirect(`http://localhost:5173/student/payment/success/${req.params.tranId}`);
+  } 
 });
 
-app.get('/myApplications/payment/success/:tranId', async (req, res) => {
+// FAIL Route (Dynamic redirect)
+app.post("/payment/fail/:tranId", async (req, res) => {
+  const payment = await paymentCollection.findOne({ transactionId: req.params.tranId });
+
+  if (!payment) {
+    return res.status(404).send("Payment not found");
+  }
+
+  await paymentCollection.deleteOne({ transactionId: req.params.tranId });
+
+  if (payment.source === "myApplications") {
+    res.redirect(`http://localhost:5173/tutor/myApplications`);
+  } else if (payment.source === "appliedTutors") {
+    res.redirect(`http://localhost:5173/student/posted-jobs/applied-tutors`);
+  }
+});
+
+
+app.get('/payment/success/:tranId', async (req, res) => {
   const tranId = req.params.tranId;
 
   try {
@@ -459,6 +474,21 @@ app.get('/myApplications/payment/success/:tranId', async (req, res) => {
     res.status(500).json({ message: 'Internal server error' });
   }
 });
+
+
+   // GET all payments for a jobId
+app.get("/payments/:jobId", async (req, res) => {
+  const { jobId } = req.params;
+  try {
+    const payments = await paymentCollection
+      .find({ jobId, paidStatus: true })
+      .toArray(); // if using MongoDB native driver
+    res.status(200).json(payments);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch payment data" });
+  }
+});
+
 
 //Get all paid jobs for a user
 
