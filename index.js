@@ -1,7 +1,7 @@
 const express = require("express");
 require("dotenv").config();
 const cors = require("cors");
-const SSLCommerzPayment = require('sslcommerz-lts')
+const SSLCommerzPayment = require("sslcommerz-lts");
 const jwt = require("jsonwebtoken");
 const app = express();
 const { ObjectId } = require("mongodb");
@@ -23,19 +23,22 @@ const client = new MongoClient(uri, {
   },
 });
 
-
 const store_id = process.env.STORE_ID;
 const store_passwd = process.env.STORE_PASSWD;
-const is_live = false //true for live, false for sandbox
-
+const is_live = false; //true for live, false for sandbox
 
 async function run() {
   try {
     // Connect the client to the server	(optional starting in v4.7)
     // await client.connect();
     const userCollection = client.db("tuitionNetworkDB").collection("users");
-    const tutorRequestCollection = client.db("tuitionNetworkDB").collection("tutorRequests");
-    const paymentCollection = client.db("tuitionNetworkDB").collection("payments");
+    const tutorRequestCollection = client
+      .db("tuitionNetworkDB")
+      .collection("tutorRequests");
+    const paymentCollection = client
+      .db("tuitionNetworkDB")
+      .collection("payments");
+    const tutorCollection = client.db("tuitionNetworkDB").collection("tutors");
     // auth related api
     app.post("/jwt", async (req, res) => {
       const user = req.body;
@@ -132,6 +135,36 @@ async function run() {
       res.send(result);
     });
 
+    // Post new tutor
+    app.post("/tutors", async (req, res) => {
+      const tutor = req.body;
+      const query = { email: tutor.email };
+      const existingTutor = await tutorCollection.findOne(query);
+      if (existingTutor) {
+        return res.send({ message: "Tutor already exists", insertedId: null });
+      }
+      const result = await tutorCollection.insertOne(tutor);
+      res.send(result);
+    });
+
+    app.put("/tutors/:email", verifyToken, async (req, res) => {
+      const email = req.params.email;
+      const updatedData = req.body;
+
+      const result = await tutorCollection.updateOne(
+        { email },
+        { $set: updatedData },
+        { upsert: true }
+      );
+
+      res.send(result);
+    });
+
+    app.get("/tutors", async (req, res) => {
+      const tutors = await tutorCollection.find().toArray();
+      res.send(tutors);
+    });
+
     // delete user by admin
     app.delete("/users/:email", verifyToken, verifyAdmin, async (req, res) => {
       const email = req.params.email;
@@ -174,6 +207,46 @@ async function run() {
       const result = await tutorRequestCollection.find().toArray();
       res.send(result);
     });
+
+
+    // Get all confirmed tutors for a specific tutor email
+app.get("/confirmedTutors/:email", async (req, res) => {
+  const userEmail = req.params.email.toLowerCase();
+
+  try {
+    // Find all tutor requests where this tutor applied and got confirmed
+    const posts = await tutorRequestCollection
+      .find({ "appliedTutors.email": tutorEmail })
+      .toArray();
+
+    // Filter only confirmed tutors
+    const confirmedTutors = posts
+      .map((post) =>
+        post.appliedTutors
+          .filter(
+            (tutor) =>
+              tutor.email.toLowerCase() === tutorEmail &&
+              tutor.confirmationStatus === "confirmed"
+          )
+          .map((tutor) => ({
+            name: tutor.name,
+            email: tutor.email,
+            photoURL: tutor.photoURL || "https://i.ibb.co/7n4R8Rt/default-avatar.png",
+            postId: post._id,
+            location: post.location,
+            salary: post.salary,
+            duration: post.duration,
+          }))
+      )
+      .flat();
+
+    res.status(200).json(confirmedTutors);
+  } catch (error) {
+    console.error("Error fetching confirmed tutors:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
 
     // approve and apply jobs ,update tutor requests
     app.put("/tutorRequests/:id", async (req, res) => {
@@ -269,48 +342,58 @@ async function run() {
         }
 
         // Confirming a tutor
-if (req.body.confirmedTutorEmail) {
-  const { confirmedTutorEmail } = req.body;
+        if (req.body.confirmedTutorEmail) {
+          const { confirmedTutorEmail } = req.body;
 
-  // First, fetch the current tutor request
-  const tutorRequest = await tutorRequestCollection.findOne({ _id: new ObjectId(id) });
+          // First, fetch the current tutor request
+          const tutorRequest = await tutorRequestCollection.findOne({
+            _id: new ObjectId(id),
+          });
 
-  if (!tutorRequest) {
-    return res.status(404).send({ message: "Tutor request not found." });
-  }
+          if (!tutorRequest) {
+            return res
+              .status(404)
+              .send({ message: "Tutor request not found." });
+          }
 
-  const updatedTutors = tutorRequest.appliedTutors.map((tutor) => {
-    if (tutor.email === confirmedTutorEmail) {
-      return { ...tutor, confirmationStatus: "confirmed" };
-    } else {
-      const { confirmationStatus, ...rest } = tutor;
-      return rest; // remove confirmationStatus if exists
-    }
-  });
+          const updatedTutors = tutorRequest.appliedTutors.map((tutor) => {
+            if (tutor.email === confirmedTutorEmail) {
+              return { ...tutor, confirmationStatus: "confirmed" };
+            } else {
+              const { confirmationStatus, ...rest } = tutor;
+              return rest; // remove confirmationStatus if exists
+            }
+          });
 
-  result = await tutorRequestCollection.updateOne(
-    { _id: new ObjectId(id) },
-    { $set: { appliedTutors: updatedTutors } }
-  );
+          result = await tutorRequestCollection.updateOne(
+            { _id: new ObjectId(id) },
+            { $set: { appliedTutors: updatedTutors } }
+          );
 
-  if (result.modifiedCount > 0) {
-    return res.send({ message: "Tutor confirmed successfully." });
-  } else {
-    return res.status(400).send({ message: "Failed to confirm tutor." });
-  }
-}
+          if (result.modifiedCount > 0) {
+            return res.send({ message: "Tutor confirmed successfully." });
+          } else {
+            return res
+              .status(400)
+              .send({ message: "Failed to confirm tutor." });
+          }
+        }
 
-// Canceling a tutor confirmation
+        // Canceling a tutor confirmation
 if (req.body.cancelConfirmation) {
   // Find the tutor request
-  const tutorRequest = await tutorRequestCollection.findOne({ _id: new ObjectId(id) });
+  const tutorRequest = await tutorRequestCollection.findOne({
+    _id: new ObjectId(id),
+  });
 
   if (!tutorRequest) {
     return res.status(404).send({ message: "Tutor request not found." });
   }
 
   // Remove confirmationStatus from all tutors
-  const updatedTutors = tutorRequest.appliedTutors.map(({ confirmationStatus, ...rest }) => rest);
+  const updatedTutors = tutorRequest.appliedTutors.map(
+    ({ confirmationStatus, ...rest }) => rest
+  );
 
   result = await tutorRequestCollection.updateOne(
     { _id: new ObjectId(id) },
@@ -318,11 +401,49 @@ if (req.body.cancelConfirmation) {
   );
 
   if (result.modifiedCount > 0) {
-    return res.send({ message: "Tutor confirmation cancelled successfully." });
+    return res.send({
+      message: "Tutor confirmation cancelled successfully.",
+    });
   } else {
-    return res.status(400).send({ message: "Failed to cancel confirmation." });
+    return res
+      .status(400)
+      .send({ message: "Failed to cancel confirmation." });
   }
 }
+
+        // Canceling a tutor confirmation
+        // if (req.body.cancelConfirmation) {
+        //   // Find the tutor request
+        //   const tutorRequest = await tutorRequestCollection.findOne({
+        //     _id: new ObjectId(id),
+        //   });
+
+        //   if (!tutorRequest) {
+        //     return res
+        //       .status(404)
+        //       .send({ message: "Tutor request not found." });
+        //   }
+
+        //   // Remove confirmationStatus from all tutors
+        //   const updatedTutors = tutorRequest.appliedTutors.map(
+        //     ({ confirmationStatus, ...rest }) => rest
+        //   );
+
+        //   result = await tutorRequestCollection.updateOne(
+        //     { _id: new ObjectId(id) },
+        //     { $set: { appliedTutors: updatedTutors } }
+        //   );
+
+        //   if (result.modifiedCount > 0) {
+        //     return res.send({
+        //       message: "Tutor confirmation cancelled successfully.",
+        //     });
+        //   } else {
+        //     return res
+        //       .status(400)
+        //       .send({ message: "Failed to cancel confirmation." });
+        //   }
+        // }
 
         // If no valid fields provided
         return res
@@ -352,6 +473,24 @@ if (req.body.cancelConfirmation) {
       }
     });
 
+    // GET applied tutors for jobId
+    app.get("/appliedTutorForJobId/:jobId", async (req, res) => {
+      const jobId = req.params.jobId;
+
+      try {
+        const job = await tutorRequestCollection.findOne({
+          _id: new ObjectId(jobId),
+        });
+        if (!job) {
+          return res.status(404).json({ message: "Job not found" });
+        }
+        res.json(job.appliedTutors || []);
+      } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: "Internal server error" });
+      }
+    });
+
     // delete tutor request by admin
     app.delete("/tutorRequests/:id", async (req, res) => {
       const id = req.params.id;
@@ -366,137 +505,182 @@ if (req.body.cancelConfirmation) {
       }
     });
 
-
     //payment related api
 
-app.post("/paymentBkash", async (req, res) => {
-  const { jobId, name, email, amount, source, productName = "Tuition Payment" } = req.body;
-  const tran_id = new ObjectId().toString();
+    app.post("/paymentBkash", async (req, res) => {
+      const {
+        jobId,
+        name,
+        email,
+        amount,
+        source,
+        studentEmail,
+        studentName,
+        productName = "Tuition Payment",
+      } = req.body;
+      const tran_id = new ObjectId().toString();
 
-  const data = {
-    total_amount: amount,
-    currency: "BDT",
-    tran_id,
-    success_url: `http://localhost:5000/payment/success/${tran_id}`,
-    fail_url: `http://localhost:5000/payment/fail/${tran_id}`,
-    cancel_url: `http://localhost:5000/paymentCancel`,
-    ipn_url: `http://localhost:5000/ipn`,
-    shipping_method: "Courier",
-    product_name: productName,
-    product_category: "Tuition",
-    product_profile: "general",
-    cus_name: name,
-    cus_email: email,
-    cus_add1: "Dhaka",
-    cus_add2: "Dhaka",
-    cus_city: "Dhaka",
-    cus_state: "Dhaka",
-    cus_postcode: "1000",
-    cus_country: "Bangladesh",
-    cus_phone: "01711111111",
-    cus_fax: "01711111111",
-    ship_name: "Customer Name",
-    ship_add1: "Dhaka",
-    ship_add2: "Dhaka",
-    ship_city: "Dhaka",
-    ship_state: "Dhaka",
-    ship_postcode: 1000,
-    ship_country: "Bangladesh",
-  };
+      const data = {
+        total_amount: amount,
+        currency: "BDT",
+        tran_id,
+        success_url: `http://localhost:5000/payment/success/${tran_id}`,
+        fail_url: `http://localhost:5000/payment/fail/${tran_id}`,
+        cancel_url: `http://localhost:5000/paymentCancel`,
+        ipn_url: `http://localhost:5000/ipn`,
+        shipping_method: "Courier",
+        product_name: productName,
+        product_category: "Tuition",
+        product_profile: "general",
+        cus_name: name,
+        cus_email: email,
+        cus_add1: "Dhaka",
+        cus_add2: "Dhaka",
+        cus_city: "Dhaka",
+        cus_state: "Dhaka",
+        cus_postcode: "1000",
+        cus_country: "Bangladesh",
+        cus_phone: "01711111111",
+        cus_fax: "01711111111",
+        ship_name: "Customer Name",
+        ship_add1: "Dhaka",
+        ship_add2: "Dhaka",
+        ship_city: "Dhaka",
+        ship_state: "Dhaka",
+        ship_postcode: 1000,
+        ship_country: "Bangladesh",
+      };
 
-  const sslcz = new SSLCommerzPayment(store_id, store_passwd, is_live);
-  sslcz.init(data).then(apiResponse => {
-    res.send({ url: apiResponse.GatewayPageURL });
+      const sslcz = new SSLCommerzPayment(store_id, store_passwd, is_live);
+      sslcz.init(data).then((apiResponse) => {
+        res.send({ url: apiResponse.GatewayPageURL });
 
-    paymentCollection.insertOne({
-      jobId,
-      transactionId: tran_id,
-      amount,
-      email,
-      name,
-      source, 
-      paidStatus: false,
-      paymentTime: new Date(),
+        paymentCollection.insertOne({
+          jobId,
+          transactionId: tran_id,
+          amount,
+          email,
+          name,
+          source,
+          studentEmail,
+          studentName,
+          paidStatus: false,
+          paymentTime: new Date(),
+        });
+      });
     });
-  });
-});
-// SUCCESS Route (Dynamic redirect)
-app.post("/payment/success/:tranId", async (req, res) => {
-  const payment = await paymentCollection.findOne({ transactionId: req.params.tranId });
+    // SUCCESS Route (Dynamic redirect)
+    app.post("/payment/success/:tranId", async (req, res) => {
+      const payment = await paymentCollection.findOne({
+        transactionId: req.params.tranId,
+      });
 
-  if (!payment) {
-    return res.status(404).send("Payment not found");
-  }
+      if (!payment) {
+        return res.status(404).send("Payment not found");
+      }
 
-  await paymentCollection.updateOne(
-    { transactionId: req.params.tranId },
-    { $set: { paidStatus: true } }
-  );
+      await paymentCollection.updateOne(
+        { transactionId: req.params.tranId },
+        { $set: { paidStatus: true } }
+      );
 
-  if (payment.source === "myApplications") {
-    res.redirect(`http://localhost:5173/tutor/payment/success/${req.params.tranId}`);
-  } else if (payment.source === "appliedTutors") {
-    res.redirect(`http://localhost:5173/student/payment/success/${req.params.tranId}`);
-  } 
-});
+      if (payment.source === "myApplications") {
+        res.redirect(
+          `http://localhost:5173/tutor/payment/success/${req.params.tranId}`
+        );
+      } else if (payment.source === "trialClassPayment") {
+        res.redirect(
+          `http://localhost:5173/student/payment/success/${req.params.tranId}`
+        );
+      }
+    });
 
-// FAIL Route (Dynamic redirect)
-app.post("/payment/fail/:tranId", async (req, res) => {
-  const payment = await paymentCollection.findOne({ transactionId: req.params.tranId });
+    // FAIL Route (Dynamic redirect)
+    app.post("/payment/fail/:tranId", async (req, res) => {
+      const payment = await paymentCollection.findOne({
+        transactionId: req.params.tranId,
+      });
 
-  if (!payment) {
-    return res.status(404).send("Payment not found");
-  }
+      if (!payment) {
+        return res.status(404).send("Payment not found");
+      }
 
-  await paymentCollection.deleteOne({ transactionId: req.params.tranId });
+      await paymentCollection.deleteOne({ transactionId: req.params.tranId });
 
-  if (payment.source === "myApplications") {
-    res.redirect(`http://localhost:5173/tutor/myApplications`);
-  } else if (payment.source === "appliedTutors") {
-    res.redirect(`http://localhost:5173/student/posted-jobs/applied-tutors`);
-  }
-});
+      if (payment.source === "myApplications") {
+        res.redirect(`http://localhost:5173/tutor/myApplications`);
+      } else if (payment.source === "trialClassPayment") {
+        res.redirect(
+          `http://localhost:5173/student/posted-jobs/applied-tutors`
+        );
+      }
+    });
+
+    app.get("/payment/success/:tranId", async (req, res) => {
+      const tranId = req.params.tranId;
+
+      try {
+        const payment = await paymentCollection.findOne({
+          transactionId: tranId,
+        });
+
+        if (!payment) {
+          return res.status(404).json({ message: "Payment not found" });
+        }
+
+        res.status(200).json(payment);
+      } catch (error) {
+        console.error("Error fetching payment:", error);
+        res.status(500).json({ message: "Internal server error" });
+      }
+    });
+
+    // GET all payments for a jobId
+    app.get("/payments/:jobId", async (req, res) => {
+      const { jobId } = req.params;
+      try {
+        const payments = await paymentCollection
+          .find({ jobId, paidStatus: true })
+          .toArray(); // if using MongoDB native driver
+        res.status(200).json(payments);
+      } catch (err) {
+        res.status(500).json({ error: "Failed to fetch payment data" });
+      }
+    });
+
+    //Get all paid jobs for a user
+
+    app.get("/tutor/paidJobs/:email", async (req, res) => {
+      const email =  req.params.email;
+
+      const payments = await paymentCollection
+        .find({ email, paidStatus: true })
+        .toArray();
+
+      const paidJobIds = payments.map((p) => new ObjectId(p.jobId));
+
+      const jobs = await tutorRequestCollection
+        .find({ _id: { $in: paidJobIds } })
+        .toArray();
+
+      // Merge payment info with job info
+      const merged = payments.map((payment) => {
+        const job = jobs.find((j) => j._id.toString() === payment.jobId);
+        return {
+          ...payment,
+          jobDetails: job || null,
+        };
+      });
+
+      res.send(merged);
+    });
 
 
-app.get('/payment/success/:tranId', async (req, res) => {
-  const tranId = req.params.tranId;
-
-  try {
-    const payment = await paymentCollection.findOne({ transactionId: tranId });
-
-    if (!payment) {
-      return res.status(404).json({ message: 'Payment not found' });
-    }
-
-    res.status(200).json(payment);
-  } catch (error) {
-    console.error('Error fetching payment:', error);
-    res.status(500).json({ message: 'Internal server error' });
-  }
-});
-
-
-   // GET all payments for a jobId
-app.get("/payments/:jobId", async (req, res) => {
-  const { jobId } = req.params;
-  try {
-    const payments = await paymentCollection
-      .find({ jobId, paidStatus: true })
-      .toArray(); // if using MongoDB native driver
-    res.status(200).json(payments);
-  } catch (err) {
-    res.status(500).json({ error: "Failed to fetch payment data" });
-  }
-});
-
-
-//Get all paid jobs for a user
-
-app.get("/user/paidJobs/:email", async (req, res) => {
-  const email = req.params.email;
+    app.get("/student/paidJobs/:studentEmail", async (req, res) => {
+  const studentEmail = req.params.studentEmail;
 
   const payments = await paymentCollection
-    .find({ email, paidStatus: true })
+    .find({ studentEmail, paidStatus: true })  // <--- use studentEmail
     .toArray();
 
   const paidJobIds = payments.map((p) => new ObjectId(p.jobId));
@@ -517,6 +701,24 @@ app.get("/user/paidJobs/:email", async (req, res) => {
   res.send(merged);
 });
 
+
+    app.post("/payments/multiple", async (req, res) => {
+      const { jobIds } = req.body;
+      if (!Array.isArray(jobIds))
+        return res.status(400).send("jobIds must be an array");
+
+      try {
+        const payments = await paymentCollection
+          .find({
+            jobId: { $in: jobIds },
+          })
+          .toArray();
+
+        res.json(payments);
+      } catch (error) {
+        res.status(500).send("Server error");
+      }
+    });
 
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
