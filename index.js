@@ -32,10 +32,14 @@ async function run() {
     // Connect the client to the server	(optional starting in v4.7)
     // await client.connect();
     const userCollection = client.db("tuitionNetworkDB").collection("users");
-    const tutorRequestCollection = client.db("tuitionNetworkDB").collection("tutorRequests");
-    const paymentCollection = client.db("tuitionNetworkDB").collection("payments");
+    const tutorRequestCollection = client
+      .db("tuitionNetworkDB")
+      .collection("tutorRequests");
+    const paymentCollection = client
+      .db("tuitionNetworkDB")
+      .collection("payments");
     const tutorCollection = client.db("tuitionNetworkDB").collection("tutors");
-    const ratingCollection = client.db("tuitionNetworkDB").collection("ratings");
+ 
     // auth related api
     app.post("/jwt", async (req, res) => {
       const user = req.body;
@@ -144,52 +148,43 @@ async function run() {
       res.send(result);
     });
 
-    // app.put("/tutors/:email", verifyToken, async (req, res) => {
-    //   const email = req.params.email;
-    //   const updatedData = req.body;
-
-    //   const result = await tutorCollection.updateOne(
-    //     { email },
-    //     { $set: updatedData },
-    //     { upsert: true }
-    //   );
-
-    //   res.send(result);
-    // });
-
     app.put("/tutors/:email", verifyToken, async (req, res) => {
-  const email = req.params.email;
-  const updatedData = req.body; 
+      const email = req.params.email;
+      const updatedData = req.body;
 
-  if (updatedData.rating) {
-    const tutor = await tutorCollection.findOne({ email });
+      if (updatedData.rating) {
+        const tutor = await tutorCollection.findOne({ email });
 
-    let ratings = tutor?.ratings || [];
-    ratings.push(updatedData.rating);
+        let ratings = tutor?.ratings || [];
+        ratings.push(updatedData.rating);
 
-    // average calculation
-    const averageRating =
-      ratings.reduce((sum, r) => sum + r, 0) / ratings.length;
+        // average calculation
+        const averageRating =
+          ratings.reduce((sum, r) => sum + r, 0) / ratings.length;
 
+        updatedData.ratings = ratings;
+        updatedData.averageRating = averageRating;
+      }
 
-    updatedData.ratings = ratings;
-    updatedData.averageRating = averageRating;
-  }
+      const result = await tutorCollection.updateOne(
+        { email },
+        { $set: updatedData },
+        { upsert: true }
+      );
 
-
-  const result = await tutorCollection.updateOne(
-    { email },
-    { $set: updatedData },
-    { upsert: true }
-  );
-
-  res.send(result);
-});
-
+      res.send(result);
+    });
 
     app.get("/tutors", async (req, res) => {
       const tutors = await tutorCollection.find().toArray();
       res.send(tutors);
+    });
+
+    // server.js বা যেখানে তোমার route আছে
+    app.get("/tutors/:email", async (req, res) => {
+      const email = req.params.email;
+      const tutor = await tutorCollection.findOne({ email: email });
+      res.send(tutor);
     });
 
     // delete user by admin
@@ -235,45 +230,45 @@ async function run() {
       res.send(result);
     });
 
-
     // Get all confirmed tutors for a specific tutor email
-app.get("/confirmedTutors/:email", async (req, res) => {
-  const userEmail = req.params.email.toLowerCase();
+    app.get("/confirmedTutors/:email", async (req, res) => {
+      const userEmail = req.params.email.toLowerCase();
 
-  try {
-    // Find all tutor requests where this tutor applied and got confirmed
-    const posts = await tutorRequestCollection
-      .find({ "appliedTutors.email": tutorEmail })
-      .toArray();
+      try {
+        // Find all tutor requests where this tutor applied and got confirmed
+        const posts = await tutorRequestCollection
+          .find({ "appliedTutors.email": tutorEmail })
+          .toArray();
 
-    // Filter only confirmed tutors
-    const confirmedTutors = posts
-      .map((post) =>
-        post.appliedTutors
-          .filter(
-            (tutor) =>
-              tutor.email.toLowerCase() === tutorEmail &&
-              tutor.confirmationStatus === "confirmed"
+        // Filter only confirmed tutors
+        const confirmedTutors = posts
+          .map((post) =>
+            post.appliedTutors
+              .filter(
+                (tutor) =>
+                  tutor.email.toLowerCase() === tutorEmail &&
+                  tutor.confirmationStatus === "confirmed"
+              )
+              .map((tutor) => ({
+                name: tutor.name,
+                email: tutor.email,
+                photoURL:
+                  tutor.photoURL ||
+                  "https://i.ibb.co/7n4R8Rt/default-avatar.png",
+                postId: post._id,
+                location: post.location,
+                salary: post.salary,
+                duration: post.duration,
+              }))
           )
-          .map((tutor) => ({
-            name: tutor.name,
-            email: tutor.email,
-            photoURL: tutor.photoURL || "https://i.ibb.co/7n4R8Rt/default-avatar.png",
-            postId: post._id,
-            location: post.location,
-            salary: post.salary,
-            duration: post.duration,
-          }))
-      )
-      .flat();
+          .flat();
 
-    res.status(200).json(confirmedTutors);
-  } catch (error) {
-    console.error("Error fetching confirmed tutors:", error);
-    res.status(500).json({ message: "Internal server error" });
-  }
-});
-
+        res.status(200).json(confirmedTutors);
+      } catch (error) {
+        console.error("Error fetching confirmed tutors:", error);
+        res.status(500).json({ message: "Internal server error" });
+      }
+    });
 
     // approve and apply jobs ,update tutor requests
     app.put("/tutorRequests/:id", async (req, res) => {
@@ -407,70 +402,38 @@ app.get("/confirmedTutors/:email", async (req, res) => {
         }
 
         // Canceling a tutor confirmation
-if (req.body.cancelConfirmation) {
-  // Find the tutor request
-  const tutorRequest = await tutorRequestCollection.findOne({
-    _id: new ObjectId(id),
-  });
+        if (req.body.cancelConfirmation) {
+          // Find the tutor request
+          const tutorRequest = await tutorRequestCollection.findOne({
+            _id: new ObjectId(id),
+          });
 
-  if (!tutorRequest) {
-    return res.status(404).send({ message: "Tutor request not found." });
-  }
+          if (!tutorRequest) {
+            return res
+              .status(404)
+              .send({ message: "Tutor request not found." });
+          }
 
-  // Remove confirmationStatus from all tutors
-  const updatedTutors = tutorRequest.appliedTutors.map(
-    ({ confirmationStatus, ...rest }) => rest
-  );
+          // Remove confirmationStatus from all tutors
+          const updatedTutors = tutorRequest.appliedTutors.map(
+            ({ confirmationStatus, ...rest }) => rest
+          );
 
-  result = await tutorRequestCollection.updateOne(
-    { _id: new ObjectId(id) },
-    { $set: { appliedTutors: updatedTutors } }
-  );
+          result = await tutorRequestCollection.updateOne(
+            { _id: new ObjectId(id) },
+            { $set: { appliedTutors: updatedTutors } }
+          );
 
-  if (result.modifiedCount > 0) {
-    return res.send({
-      message: "Tutor confirmation cancelled successfully.",
-    });
-  } else {
-    return res
-      .status(400)
-      .send({ message: "Failed to cancel confirmation." });
-  }
-}
-
-        // Canceling a tutor confirmation
-        // if (req.body.cancelConfirmation) {
-        //   // Find the tutor request
-        //   const tutorRequest = await tutorRequestCollection.findOne({
-        //     _id: new ObjectId(id),
-        //   });
-
-        //   if (!tutorRequest) {
-        //     return res
-        //       .status(404)
-        //       .send({ message: "Tutor request not found." });
-        //   }
-
-        //   // Remove confirmationStatus from all tutors
-        //   const updatedTutors = tutorRequest.appliedTutors.map(
-        //     ({ confirmationStatus, ...rest }) => rest
-        //   );
-
-        //   result = await tutorRequestCollection.updateOne(
-        //     { _id: new ObjectId(id) },
-        //     { $set: { appliedTutors: updatedTutors } }
-        //   );
-
-        //   if (result.modifiedCount > 0) {
-        //     return res.send({
-        //       message: "Tutor confirmation cancelled successfully.",
-        //     });
-        //   } else {
-        //     return res
-        //       .status(400)
-        //       .send({ message: "Failed to cancel confirmation." });
-        //   }
-        // }
+          if (result.modifiedCount > 0) {
+            return res.send({
+              message: "Tutor confirmation cancelled successfully.",
+            });
+          } else {
+            return res
+              .status(400)
+              .send({ message: "Failed to cancel confirmation." });
+          }
+        }
 
         // If no valid fields provided
         return res
@@ -678,7 +641,7 @@ if (req.body.cancelConfirmation) {
     //Get all paid jobs for a user
 
     app.get("/tutor/paidJobs/:email", async (req, res) => {
-      const email =  req.params.email;
+      const email = req.params.email;
 
       const payments = await paymentCollection
         .find({ email, paidStatus: true })
@@ -702,32 +665,30 @@ if (req.body.cancelConfirmation) {
       res.send(merged);
     });
 
-
     app.get("/student/paidJobs/:studentEmail", async (req, res) => {
-  const studentEmail = req.params.studentEmail;
+      const studentEmail = req.params.studentEmail;
 
-  const payments = await paymentCollection
-    .find({ studentEmail, paidStatus: true })  // <--- use studentEmail
-    .toArray();
+      const payments = await paymentCollection
+        .find({ studentEmail, paidStatus: true }) // <--- use studentEmail
+        .toArray();
 
-  const paidJobIds = payments.map((p) => new ObjectId(p.jobId));
+      const paidJobIds = payments.map((p) => new ObjectId(p.jobId));
 
-  const jobs = await tutorRequestCollection
-    .find({ _id: { $in: paidJobIds } })
-    .toArray();
+      const jobs = await tutorRequestCollection
+        .find({ _id: { $in: paidJobIds } })
+        .toArray();
 
-  // Merge payment info with job info
-  const merged = payments.map((payment) => {
-    const job = jobs.find((j) => j._id.toString() === payment.jobId);
-    return {
-      ...payment,
-      jobDetails: job || null,
-    };
-  });
+      // Merge payment info with job info
+      const merged = payments.map((payment) => {
+        const job = jobs.find((j) => j._id.toString() === payment.jobId);
+        return {
+          ...payment,
+          jobDetails: job || null,
+        };
+      });
 
-  res.send(merged);
-});
-
+      res.send(merged);
+    });
 
     app.post("/payments/multiple", async (req, res) => {
       const { jobIds } = req.body;
@@ -747,35 +708,7 @@ if (req.body.cancelConfirmation) {
       }
     });
 
-
-
-    app.post("/ratings/:tutorEmail", verifyToken, async (req, res) => {
-  const { tutorEmail } = req.params;
-  const { rating, studentEmail } = req.body;
-
-  // এক ইউজার একবারই রেট করতে পারবে চাইলে updateOne
-  await ratingCollection.updateOne(
-    { tutorEmail, studentEmail },
-    { $set: { rating } },
-    { upsert: true }
-  );
-
-  // Average বের করা
-  const pipeline = [
-    { $match: { tutorEmail } },
-    { $group: { _id: null, avgRating: { $avg: "$rating" } } },
-  ];
-  const result = await ratingCollection.aggregate(pipeline).toArray();
-  const avgRating = result[0]?.avgRating || 0;
-
-  await tutorCollection.updateOne(
-    { email: tutorEmail },
-    { $set: { averageRating: avgRating } }
-  );
-
-  res.send({ success: true, averageRating: avgRating });
-});
-
+   
 
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
