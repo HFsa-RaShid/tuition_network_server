@@ -1,6 +1,7 @@
 const express = require("express");
 require("dotenv").config();
 const cors = require("cors");
+const nodemailer = require("nodemailer");
 const SSLCommerzPayment = require("sslcommerz-lts");
 const jwt = require("jsonwebtoken");
 const app = express();
@@ -178,18 +179,6 @@ async function run() {
       res.send({ ...result, customId });
     });
 
-    // Post new tutor
-    // app.post("/tutors", async (req, res) => {
-    //   const tutor = req.body;
-    //   const query = { email: tutor.email };
-    //   const existingTutor = await tutorCollection.findOne(query);
-    //   if (existingTutor) {
-    //     return res.send({ message: "Tutor already exists", insertedId: null });
-    //   }
-    //   const result = await tutorCollection.insertOne(tutor);
-    //   res.send(result);
-    // });
-
     app.post("/tutors", async (req, res) => {
       const tutor = req.body;
 
@@ -255,7 +244,7 @@ async function run() {
     app.get("/tutors/profile/:id", async (req, res) => {
       try {
         const id = req.params.id;
-        const tutor = await tutorCollection.findOne({ customId: id }); 
+        const tutor = await tutorCollection.findOne({ customId: id });
         if (!tutor) {
           return res.status(404).send({ message: "Tutor not found" });
         }
@@ -352,7 +341,7 @@ async function run() {
     // approve and apply jobs ,update tutor requests
     app.put("/tutorRequests/:id", async (req, res) => {
       const { id } = req.params;
-      const { email, name,tutorId, status, tutorStatus } = req.body;
+      const { email, name, tutorId, status, tutorStatus } = req.body;
 
       try {
         let result;
@@ -690,7 +679,9 @@ async function run() {
           `http://localhost:5173/student/posted-jobs/applied-tutors`
         );
       } else if (payment.source === "contactTutor") {
-        res.redirect(`http://localhost:5173/tutors/tutor-profile/${payment.tutorId}`); 
+        res.redirect(
+          `http://localhost:5173/tutors/tutor-profile/${payment.tutorId}`
+        );
       }
     });
 
@@ -795,6 +786,61 @@ async function run() {
         res.status(500).send("Server error");
       }
     });
+
+    //............................
+
+    app.post("/contact", (req, res) => {
+      const { tutorName, studentName, tutorEmail, studentEmail, message } =
+        req.body;
+
+      const transporter = nodemailer.createTransport({
+        service: "gmail",
+        auth: {
+          user: process.env.EMAIL_USER,
+          pass: process.env.EMAIL_PASS,
+        },
+      });
+
+      const mailOptions = {
+        from: studentEmail,
+        to: tutorEmail,
+        subject: `Tuition Request from ${studentName}`,
+        text: `
+Dear ${tutorName},
+
+I hope this message finds you well.
+
+My name is ${studentName}. I came across your profile and was impressed by your expertise. I am interested in receiving tuition from you and would like to discuss the possibility of learning under your guidance.
+
+Here are my details:
+
+Name: ${studentName}
+Email: ${studentEmail}
+
+Message:
+${message}
+
+I would greatly appreciate it if you could consider my request and respond at your convenience.
+
+Thank you very much for your time and consideration.
+
+Best regards,
+${studentName}
+`,
+      };
+
+      transporter.sendMail(mailOptions, (error, info) => {
+        if (error) {
+          console.error("Error sending email:", error);
+          res.status(500).send("Failed to send message.");
+        } else {
+          console.log("Email sent:", info.response);
+          res.status(200).send("Message sent successfully!");
+        }
+      });
+    });
+
+    //...............................................
 
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
