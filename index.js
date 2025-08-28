@@ -39,7 +39,27 @@ async function run() {
       .db("tuitionNetworkDB")
       .collection("payments");
     const tutorCollection = client.db("tuitionNetworkDB").collection("tutors");
- 
+
+    // ------------------ Custom ID Generator ------------------
+    async function generateCustomId(role, collection) {
+      const prefix = role === "student" ? "SID" : "TID";
+
+      const lastUser = await collection
+        .find({ role })
+        .sort({ createdAt: -1 })
+        .limit(1)
+        .toArray();
+
+      let newNumber = 1;
+      if (lastUser.length > 0 && lastUser[0].customId) {
+        const lastId = lastUser[0].customId; // যেমন SID-5
+        const lastNumber = parseInt(lastId.split("-")[1]);
+        newNumber = lastNumber + 1;
+      }
+
+      return `${prefix}-${newNumber}`;
+    }
+
     // auth related api
     app.post("/jwt", async (req, res) => {
       const user = req.body;
@@ -125,28 +145,74 @@ async function run() {
     });
 
     // Post new user
+    // app.post("/users", async (req, res) => {
+    //   const user = req.body;
+    //   const query = { email: user.email };
+    //   const existingUser = await userCollection.findOne(query);
+    //   if (existingUser) {
+    //     return res.send({ message: "user already exists", insertedId: null });
+    //   }
+    //   const result = await userCollection.insertOne(user);
+    //   res.send(result);
+    // });
+
     app.post("/users", async (req, res) => {
       const user = req.body;
+
       const query = { email: user.email };
       const existingUser = await userCollection.findOne(query);
       if (existingUser) {
         return res.send({ message: "user already exists", insertedId: null });
       }
-      const result = await userCollection.insertOne(user);
-      res.send(result);
+
+      // Custom ID generate
+      const customId = await generateCustomId(user.role, userCollection);
+
+      const newUser = {
+        ...user,
+        customId,
+        createdAt: new Date(),
+      };
+
+      const result = await userCollection.insertOne(newUser);
+      res.send({ ...result, customId });
     });
 
     // Post new tutor
+    // app.post("/tutors", async (req, res) => {
+    //   const tutor = req.body;
+    //   const query = { email: tutor.email };
+    //   const existingTutor = await tutorCollection.findOne(query);
+    //   if (existingTutor) {
+    //     return res.send({ message: "Tutor already exists", insertedId: null });
+    //   }
+    //   const result = await tutorCollection.insertOne(tutor);
+    //   res.send(result);
+    // });
+
     app.post("/tutors", async (req, res) => {
       const tutor = req.body;
+
       const query = { email: tutor.email };
       const existingTutor = await tutorCollection.findOne(query);
       if (existingTutor) {
         return res.send({ message: "Tutor already exists", insertedId: null });
       }
-      const result = await tutorCollection.insertOne(tutor);
-      res.send(result);
+
+      // Custom ID generate
+      const customId = await generateCustomId("tutor", tutorCollection);
+
+      const newTutor = {
+        ...tutor,
+        customId,
+        createdAt: new Date(),
+      };
+
+      const result = await tutorCollection.insertOne(newTutor);
+      res.send({ ...result, customId });
     });
+
+    //.....................
 
     app.put("/tutors/:email", verifyToken, async (req, res) => {
       const email = req.params.email;
@@ -180,11 +246,24 @@ async function run() {
       res.send(tutors);
     });
 
-    // server.js বা যেখানে তোমার route আছে
     app.get("/tutors/:email", async (req, res) => {
       const email = req.params.email;
       const tutor = await tutorCollection.findOne({ email: email });
       res.send(tutor);
+    });
+
+    app.get("/tutors/profile/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const tutor = await tutorCollection.findOne({ customId: id }); 
+        if (!tutor) {
+          return res.status(404).send({ message: "Tutor not found" });
+        }
+        res.send(tutor);
+      } catch (error) {
+        console.error(error);
+        res.status(500).send({ message: "Internal server error" });
+      }
     });
 
     // delete user by admin
@@ -273,7 +352,7 @@ async function run() {
     // approve and apply jobs ,update tutor requests
     app.put("/tutorRequests/:id", async (req, res) => {
       const { id } = req.params;
-      const { email, name, tutorDetails, status, tutorStatus } = req.body;
+      const { email, name,tutorId, status, tutorStatus } = req.body;
 
       try {
         let result;
@@ -298,6 +377,7 @@ async function run() {
           const applyObject = {
             email,
             name,
+            tutorId,
             appliedAt: new Date(),
           };
 
@@ -502,6 +582,7 @@ async function run() {
         jobId,
         name,
         email,
+        tutorId,
         amount,
         source,
         studentEmail,
@@ -550,6 +631,7 @@ async function run() {
           transactionId: tran_id,
           amount,
           email,
+          tutorId,
           name,
           source,
           studentEmail,
@@ -582,6 +664,10 @@ async function run() {
         res.redirect(
           `http://localhost:5173/student/payment/success/${req.params.tranId}`
         );
+      } else if (payment.source === "contactTutor") {
+        res.redirect(
+          `http://localhost:5173/payment/success/${req.params.tranId}`
+        );
       }
     });
 
@@ -603,6 +689,8 @@ async function run() {
         res.redirect(
           `http://localhost:5173/student/posted-jobs/applied-tutors`
         );
+      } else if (payment.source === "contactTutor") {
+        res.redirect(`http://localhost:5173/tutors/tutor-profile/${payment.tutorId}`); 
       }
     });
 
@@ -707,8 +795,6 @@ async function run() {
         res.status(500).send("Server error");
       }
     });
-
-   
 
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
