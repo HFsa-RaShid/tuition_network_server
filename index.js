@@ -1,6 +1,7 @@
 const express = require("express");
 require("dotenv").config();
 const cors = require("cors");
+const axios = require('axios');
 const nodemailer = require("nodemailer");
 const SSLCommerzPayment = require("sslcommerz-lts");
 const jwt = require("jsonwebtoken");
@@ -787,7 +788,35 @@ async function run() {
       }
     });
 
-    //............................
+
+
+
+    //...........
+    // Nominatim geocode proxy
+app.get('/geocode', async (req, res) => {
+  const { q } = req.query; // ?q=location_query
+  if (!q) return res.status(400).json({ error: 'Missing query parameter q' });
+
+  try {
+    const response = await axios.get(
+      `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}`,
+      {
+        headers: {
+          "Accept-Language": "en",
+          "User-Agent": "tuToria (hafsa.cse28gmail.com)",
+        },
+      }
+    );
+
+    res.json(response.data);
+  } catch (err) {
+    console.error('Geocoding error:', err.message);
+    res.status(500).json({ error: 'Geocoding failed' });
+  }
+});
+
+
+    //............................Email
 
     app.post("/contact", (req, res) => {
       const { tutorName, studentName, tutorEmail, studentEmail, message } =
