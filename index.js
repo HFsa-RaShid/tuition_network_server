@@ -1,7 +1,7 @@
 const express = require("express");
 require("dotenv").config();
 const cors = require("cors");
-const axios = require('axios');
+const axios = require("axios");
 const nodemailer = require("nodemailer");
 const SSLCommerzPayment = require("sslcommerz-lts");
 const jwt = require("jsonwebtoken");
@@ -21,6 +21,7 @@ const client = new MongoClient(uri, {
   serverApi: {
     version: ServerApiVersion.v1,
     strict: true,
+    // strict: false,
     deprecationErrors: true,
   },
 });
@@ -118,45 +119,76 @@ async function run() {
       res.send(users);
     });
 
-    app.put("/users/:email", verifyToken, async (req, res) => {
-      const email = req.params.email;
-      const updatedData = req.body;
+   app.put("/users/:email", verifyToken, async (req, res) => {
+  const email = req.params.email;
+  const updatedData = req.body;
 
-      const result = await userCollection.updateOne(
-        { email },
-        { $set: updatedData },
-        { upsert: true }
+  const result = await userCollection.updateOne(
+    { email },
+    { $set: updatedData },
+    { upsert: false }
+  );
+
+  res.send(result);   // ✅ send response
+});
+      
+    // GET /users/:email
+app.get("/users/:email", async (req, res) => {
+  try {
+    const email = req.params.email;
+    let user = await userCollection.findOne({ email });
+
+    if (!user) {
+      return res.status(404).send({ error: "User not found" });
+    }
+
+    // ✅ Auto-check subscription expiry
+    if (user.profileStatus === "Premium") {
+      const lastPayment = await paymentCollection.findOne(
+        { email, source: "getPremium", paidStatus: true },
+        { sort: { paymentTime: -1 } }
       );
 
-      res.send(result);
-    });
+      if (lastPayment) {
+        const now = new Date();
+        const paymentDate = new Date(lastPayment.paymentTime);
+        const diffInDays = (now - paymentDate) / (1000 * 60 * 60 * 24);
 
-    app.get("/users/:email", async (req, res) => {
-      try {
-        const email = req.params.email;
-        const user = await userCollection.findOne({ email });
-
-        if (user) {
-          res.send(user);
-        } else {
-          res.status(404).send({ message: "User not found" });
+        if (diffInDays >= 30) {
+          // Downgrade to free
+          await userCollection.updateOne(
+            { email },
+            { $set: { profileStatus: "Free" } }
+          );
+          user.profileStatus = "Free"; // update local object so frontend sees it immediately
         }
-      } catch (error) {
-        res.status(500).send({ message: "Internal server error" });
       }
-    });
+    }
 
-    // Post new user
-    // app.post("/users", async (req, res) => {
-    //   const user = req.body;
-    //   const query = { email: user.email };
-    //   const existingUser = await userCollection.findOne(query);
-    //   if (existingUser) {
-    //     return res.send({ message: "user already exists", insertedId: null });
+    res.send(user);
+  } catch (error) {
+    console.error("Error fetching user:", error);
+    res.status(500).send({ error: "Internal server error" });
+  }
+});
+
+
+    // app.get("/users/:email", async (req, res) => {
+    //   try {
+    //     const email = req.params.email;
+    //     const user = await userCollection.findOne({ email });
+
+    //     if (user) {
+    //       res.send(user);
+    //     } else {
+    //       res.status(404).send({ message: "User not found" });
+    //     }
+    //   } catch (error) {
+    //     res.status(500).send({ message: "Internal server error" });
     //   }
-    //   const result = await userCollection.insertOne(user);
-    //   res.send(result);
     // });
+
+  
 
     app.post("/users", async (req, res) => {
       const user = req.body;
@@ -230,6 +262,8 @@ async function run() {
 
       res.send(result);
     });
+    
+   
 
     app.get("/tutors", async (req, res) => {
       const tutors = await tutorCollection.find().toArray();
@@ -522,7 +556,7 @@ async function run() {
     app.get("/appliedTutors/:email", async (req, res) => {
       const email = req.params.email.toLowerCase();
       try {
-        const tutor = await userCollection.findOne({ email: email });
+        const tutor = await tutorCollection.findOne({ email: email });
         if (!tutor) {
           return res.status(404).send({ message: "Tutor not found" });
         }
@@ -577,6 +611,7 @@ async function run() {
         source,
         studentEmail,
         studentName,
+        role,
         productName = "Tuition Payment",
       } = req.body;
       const tran_id = new ObjectId().toString();
@@ -626,6 +661,7 @@ async function run() {
           source,
           studentEmail,
           studentName,
+          role,
           paidStatus: false,
           paymentTime: new Date(),
         });
@@ -654,6 +690,15 @@ async function run() {
         res.redirect(
           `http://localhost:5173/student/payment/success/${req.params.tranId}`
         );
+      } else if (payment.source === "advanceSalary") {
+        res.redirect(
+          `http://localhost:5173/student/payment/success/${req.params.tranId}`
+        );
+      }
+      else if (payment.source === "getPremium") {
+        res.redirect(
+          `http://localhost:5173/${payment.role}/payment/success/${req.params.tranId}`
+        );
       } else if (payment.source === "contactTutor") {
         res.redirect(
           `http://localhost:5173/payment/success/${req.params.tranId}`
@@ -676,9 +721,12 @@ async function run() {
       if (payment.source === "myApplications") {
         res.redirect(`http://localhost:5173/tutor/myApplications`);
       } else if (payment.source === "trialClassPayment") {
-        res.redirect(
-          `http://localhost:5173/student/posted-jobs/applied-tutors`
-        );
+        res.redirect(`http://localhost:5173/student/hired-tutors`);
+      } else if (payment.source === "advanceSalary") {
+        res.redirect(`http://localhost:5173/student/hired-tutors`);
+      }
+      else if (payment.source === "getPremium") {
+        res.redirect(`http://localhost:5173/${payment.role}/payment`);
       } else if (payment.source === "contactTutor") {
         res.redirect(
           `http://localhost:5173/tutors/tutor-profile/${payment.tutorId}`
@@ -744,7 +792,7 @@ async function run() {
 
       res.send(merged);
     });
-
+    //////////////bad
     app.get("/student/paidJobs/:studentEmail", async (req, res) => {
       const studentEmail = req.params.studentEmail;
 
@@ -770,6 +818,10 @@ async function run() {
       res.send(merged);
     });
 
+ 
+
+
+
     app.post("/payments/multiple", async (req, res) => {
       const { jobIds } = req.body;
       if (!Array.isArray(jobIds))
@@ -788,33 +840,32 @@ async function run() {
       }
     });
 
-
-
-
     //...........
     // Nominatim geocode proxy
-app.get('/geocode', async (req, res) => {
-  const { q } = req.query; // ?q=location_query
-  if (!q) return res.status(400).json({ error: 'Missing query parameter q' });
+    app.get("/geocode", async (req, res) => {
+      const { q } = req.query; // ?q=location_query
+      if (!q)
+        return res.status(400).json({ error: "Missing query parameter q" });
 
-  try {
-    const response = await axios.get(
-      `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}`,
-      {
-        headers: {
-          "Accept-Language": "en",
-          "User-Agent": "tuToria (hafsa.cse28gmail.com)",
-        },
+      try {
+        const response = await axios.get(
+          `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(
+            q
+          )}`,
+          {
+            headers: {
+              "Accept-Language": "en",
+              "User-Agent": "tuToria (hafsa.cse28gmail.com)",
+            },
+          }
+        );
+
+        res.json(response.data);
+      } catch (err) {
+        console.error("Geocoding error:", err.message);
+        res.status(500).json({ error: "Geocoding failed" });
       }
-    );
-
-    res.json(response.data);
-  } catch (err) {
-    console.error('Geocoding error:', err.message);
-    res.status(500).json({ error: 'Geocoding failed' });
-  }
-});
-
+    });
 
     //............................Email
 
