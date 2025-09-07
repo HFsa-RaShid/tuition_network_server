@@ -114,7 +114,7 @@ async function run() {
     // };
 
     app.get("/users", async (req, res) => {
-      //varifytoken,admin
+      //verifyToken,admin
       const users = await userCollection.find().toArray();
       res.send(users);
     });
@@ -129,7 +129,7 @@ async function run() {
     { upsert: false }
   );
 
-  res.send(result);   // ✅ send response
+  res.send(result);  
 });
       
     // GET /users/:email
@@ -766,13 +766,13 @@ app.get("/users/:email", async (req, res) => {
       }
     });
 
-    //Get all paid jobs for a user
+    ////paymentHistory-tutor
 
     app.get("/tutor/paidJobs/:email", async (req, res) => {
       const email = req.params.email;
 
       const payments = await paymentCollection
-        .find({ email, paidStatus: true })
+        .find({ email, paidStatus: true, source: "myApplications" })
         .toArray();
 
       const paidJobIds = payments.map((p) => new ObjectId(p.jobId));
@@ -792,12 +792,14 @@ app.get("/users/:email", async (req, res) => {
 
       res.send(merged);
     });
-    //////////////bad
+
+
+    //paymentHistory-student + Hired Tutors
     app.get("/student/paidJobs/:studentEmail", async (req, res) => {
       const studentEmail = req.params.studentEmail;
 
       const payments = await paymentCollection
-        .find({ studentEmail, paidStatus: true }) // <--- use studentEmail
+        .find({ studentEmail, paidStatus: true }) 
         .toArray();
 
       const paidJobIds = payments.map((p) => new ObjectId(p.jobId));
