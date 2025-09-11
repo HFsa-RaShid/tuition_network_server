@@ -42,6 +42,7 @@ async function run() {
       .db("tuitionNetworkDB")
       .collection("payments");
     const tutorCollection = client.db("tuitionNetworkDB").collection("tutors");
+    const VerificationCollection = client.db("tuitionNetworkDB").collection("VerificationRequest")
 
     // ------------------ Custom ID Generator ------------------
     async function generateCustomId(role, collection) {
@@ -599,6 +600,13 @@ app.get("/users/:email", async (req, res) => {
       }
     });
 
+
+    // app.get("/paymentBkash",  async (req, res) => {
+    //   //verifyToken,admin
+    //   const paymentBkash = await paymentCollection.find().toArray();
+    //   res.send(paymentBkash);
+    // });
+
     //payment related api
 
     app.post("/paymentBkash", async (req, res) => {
@@ -726,7 +734,7 @@ app.get("/users/:email", async (req, res) => {
         res.redirect(`http://localhost:5173/student/hired-tutors`);
       }
       else if (payment.source === "getPremium") {
-        res.redirect(`http://localhost:5173/${payment.role}/payment`);
+        res.redirect(`http://localhost:5173/${payment.role}/settings/premium`);
       } else if (payment.source === "contactTutor") {
         res.redirect(
           `http://localhost:5173/tutors/tutor-profile/${payment.tutorId}`
@@ -841,6 +849,57 @@ app.get("/users/:email", async (req, res) => {
         res.status(500).send("Server error");
       }
     });
+
+
+
+app.post("/verification", async (req, res) => {
+  try {
+    const {
+      name,
+      email,
+      phone,
+      customId,
+      idImage,
+      professionalId,
+      city,
+      location,
+    } = req.body;
+
+    // Check if already submitted
+    const existing = await VerificationCollection.findOne({ email });
+    if (existing) {
+      return res.status(400).json({ message: "Request already submitted" });
+    }
+
+    // insert directly (no constructor)
+    const newRequest = {
+      name,
+      email,
+      phone,
+      customId,
+      idImage,
+      professionalId,
+      city,
+      location,
+      createdAt: new Date(),
+    };
+
+    await VerificationCollection.insertOne(newRequest);
+
+    res.status(201).json({ message: "Verification request submitted" });
+  } catch (error) {
+    console.error("Error saving request:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+
+ app.get("/verification",  async (req, res) => {
+      //verifyToken,admin
+      const verification = await VerificationCollection.find().toArray();
+      res.send(verification);
+    });
+
 
     //...........
     // Nominatim geocode proxy
