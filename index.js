@@ -66,6 +66,24 @@ async function run() {
       return `${prefix}-${newNumber}`;
     }
 
+    // ------------------ Custom Tuition ID Generator ------------------
+    async function generateTuitionId(collection) {
+      const lastRequest = await collection
+        .find({})
+        .sort({ createdAt: -1 })
+        .limit(1)
+        .toArray();
+
+      let newNumber = 1;
+      if (lastRequest.length > 0 && lastRequest[0].tuitionId) {
+        newNumber = parseInt(lastRequest[0].tuitionId) + 1;
+      }
+
+      return `${newNumber}`;
+    }
+
+    //............................................
+
     // auth related api
     app.post("/jwt", async (req, res) => {
       const user = req.body;
@@ -316,21 +334,13 @@ async function run() {
       try {
         const tutorRequest = req.body;
 
-        // generate 4 digit random id
-        const randomId = Math.floor(1000 + Math.random() * 9000);
-        tutorRequest.tuitionId = `${randomId}`;
+        const tuitionId = await generateTuitionId(tutorRequestCollection);
+        tutorRequest.tuitionId = tuitionId;
 
-        // check duplicate before insert
-        const exists = await tutorRequestCollection.findOne({
-          tuitionId: tutorRequest.tuitionId,
+        const result = await tutorRequestCollection.insertOne({
+          ...tutorRequest,
+          createdAt: new Date(),
         });
-        if (exists) {
-          return res
-            .status(400)
-            .send({ message: "Duplicate tuitionId, try again" });
-        }
-
-        const result = await tutorRequestCollection.insertOne(tutorRequest);
 
         res.status(201).send({
           message: "Tutor request submitted successfully",
@@ -342,8 +352,6 @@ async function run() {
         res.status(500).send({ message: "Error submitting tutor request" });
       }
     });
-
-    
 
     // get all tutor requests
     app.get("/tutorRequests", async (req, res) => {
@@ -464,7 +472,6 @@ async function run() {
         if (tutorStatus !== undefined) {
           let updateQuery;
 
-          // If the frontend sent empty string: unset the field
           if (tutorStatus === "") {
             updateQuery = { $unset: { tutorStatus: "" } };
           } else {
@@ -489,7 +496,6 @@ async function run() {
         if (req.body.confirmedTutorEmail) {
           const { confirmedTutorEmail } = req.body;
 
-          // First, fetch the current tutor request
           const tutorRequest = await tutorRequestCollection.findOne({
             _id: new ObjectId(id),
           });
@@ -505,7 +511,7 @@ async function run() {
               return { ...tutor, confirmationStatus: "confirmed" };
             } else {
               const { confirmationStatus, ...rest } = tutor;
-              return rest; // remove confirmationStatus if exists
+              return rest;
             }
           });
 
@@ -525,7 +531,6 @@ async function run() {
 
         // Canceling a tutor confirmation
         if (req.body.cancelConfirmation) {
-          // Find the tutor request
           const tutorRequest = await tutorRequestCollection.findOne({
             _id: new ObjectId(id),
           });
@@ -536,7 +541,6 @@ async function run() {
               .send({ message: "Tutor request not found." });
           }
 
-          // Remove confirmationStatus from all tutors
           const updatedTutors = tutorRequest.appliedTutors.map(
             ({ confirmationStatus, ...rest }) => rest
           );
