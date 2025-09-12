@@ -42,7 +42,9 @@ async function run() {
       .db("tuitionNetworkDB")
       .collection("payments");
     const tutorCollection = client.db("tuitionNetworkDB").collection("tutors");
-    const VerificationCollection = client.db("tuitionNetworkDB").collection("VerificationRequest")
+    const VerificationCollection = client
+      .db("tuitionNetworkDB")
+      .collection("VerificationRequest");
 
     // ------------------ Custom ID Generator ------------------
     async function generateCustomId(role, collection) {
@@ -120,59 +122,58 @@ async function run() {
       res.send(users);
     });
 
-   app.put("/users/:email", verifyToken, async (req, res) => {
-  const email = req.params.email;
-  const updatedData = req.body;
+    app.put("/users/:email", verifyToken, async (req, res) => {
+      const email = req.params.email;
+      const updatedData = req.body;
 
-  const result = await userCollection.updateOne(
-    { email },
-    { $set: updatedData },
-    { upsert: false }
-  );
-
-  res.send(result);  
-});
-      
-    // GET /users/:email
-app.get("/users/:email", async (req, res) => {
-  try {
-    const email = req.params.email;
-    let user = await userCollection.findOne({ email });
-
-    if (!user) {
-      return res.status(404).send({ error: "User not found" });
-    }
-
-    // ✅ Auto-check subscription expiry
-    if (user.profileStatus === "Premium") {
-      const lastPayment = await paymentCollection.findOne(
-        { email, source: "getPremium", paidStatus: true },
-        { sort: { paymentTime: -1 } }
+      const result = await userCollection.updateOne(
+        { email },
+        { $set: updatedData },
+        { upsert: false }
       );
 
-      if (lastPayment) {
-        const now = new Date();
-        const paymentDate = new Date(lastPayment.paymentTime);
-        const diffInDays = (now - paymentDate) / (1000 * 60 * 60 * 24);
+      res.send(result);
+    });
 
-        if (diffInDays >= 30) {
-          // Downgrade to free
-          await userCollection.updateOne(
-            { email },
-            { $set: { profileStatus: "Free" } }
-          );
-          user.profileStatus = "Free"; // update local object so frontend sees it immediately
+    // GET /users/:email
+    app.get("/users/:email", async (req, res) => {
+      try {
+        const email = req.params.email;
+        let user = await userCollection.findOne({ email });
+
+        if (!user) {
+          return res.status(404).send({ error: "User not found" });
         }
+
+        // ✅ Auto-check subscription expiry
+        if (user.profileStatus === "Premium") {
+          const lastPayment = await paymentCollection.findOne(
+            { email, source: "getPremium", paidStatus: true },
+            { sort: { paymentTime: -1 } }
+          );
+
+          if (lastPayment) {
+            const now = new Date();
+            const paymentDate = new Date(lastPayment.paymentTime);
+            const diffInDays = (now - paymentDate) / (1000 * 60 * 60 * 24);
+
+            if (diffInDays >= 30) {
+              // Downgrade to free
+              await userCollection.updateOne(
+                { email },
+                { $set: { profileStatus: "Free" } }
+              );
+              user.profileStatus = "Free"; // update local object so frontend sees it immediately
+            }
+          }
+        }
+
+        res.send(user);
+      } catch (error) {
+        console.error("Error fetching user:", error);
+        res.status(500).send({ error: "Internal server error" });
       }
-    }
-
-    res.send(user);
-  } catch (error) {
-    console.error("Error fetching user:", error);
-    res.status(500).send({ error: "Internal server error" });
-  }
-});
-
+    });
 
     // app.get("/users/:email", async (req, res) => {
     //   try {
@@ -188,8 +189,6 @@ app.get("/users/:email", async (req, res) => {
     //     res.status(500).send({ message: "Internal server error" });
     //   }
     // });
-
-  
 
     app.post("/users", async (req, res) => {
       const user = req.body;
@@ -263,8 +262,6 @@ app.get("/users/:email", async (req, res) => {
 
       res.send(result);
     });
-    
-   
 
     app.get("/tutors", async (req, res) => {
       const tutors = await tutorCollection.find().toArray();
@@ -314,19 +311,39 @@ app.get("/users/:email", async (req, res) => {
     });
 
     // Post tutor request
+
     app.post("/tutorRequests", verifyToken, async (req, res) => {
       try {
         const tutorRequest = req.body;
+
+        // generate 4 digit random id
+        const randomId = Math.floor(1000 + Math.random() * 9000);
+        tutorRequest.tuitionId = `${randomId}`;
+
+        // check duplicate before insert
+        const exists = await tutorRequestCollection.findOne({
+          tuitionId: tutorRequest.tuitionId,
+        });
+        if (exists) {
+          return res
+            .status(400)
+            .send({ message: "Duplicate tuitionId, try again" });
+        }
+
         const result = await tutorRequestCollection.insertOne(tutorRequest);
+
         res.status(201).send({
           message: "Tutor request submitted successfully",
           insertedId: result.insertedId,
+          tuitionId: tutorRequest.tuitionId,
         });
       } catch (error) {
         console.error(error);
         res.status(500).send({ message: "Error submitting tutor request" });
       }
     });
+
+    
 
     // get all tutor requests
     app.get("/tutorRequests", async (req, res) => {
@@ -600,12 +617,11 @@ app.get("/users/:email", async (req, res) => {
       }
     });
 
-
-    // app.get("/paymentBkash",  async (req, res) => {
-    //   //verifyToken,admin
-    //   const paymentBkash = await paymentCollection.find().toArray();
-    //   res.send(paymentBkash);
-    // });
+    app.get("/paymentBkash", async (req, res) => {
+      //verifyToken,admin
+      const paymentBkash = await paymentCollection.find().toArray();
+      res.send(paymentBkash);
+    });
 
     //payment related api
 
@@ -702,8 +718,7 @@ app.get("/users/:email", async (req, res) => {
         res.redirect(
           `http://localhost:5173/student/payment/success/${req.params.tranId}`
         );
-      }
-      else if (payment.source === "getPremium") {
+      } else if (payment.source === "getPremium") {
         res.redirect(
           `http://localhost:5173/${payment.role}/payment/success/${req.params.tranId}`
         );
@@ -732,8 +747,7 @@ app.get("/users/:email", async (req, res) => {
         res.redirect(`http://localhost:5173/student/hired-tutors`);
       } else if (payment.source === "advanceSalary") {
         res.redirect(`http://localhost:5173/student/hired-tutors`);
-      }
-      else if (payment.source === "getPremium") {
+      } else if (payment.source === "getPremium") {
         res.redirect(`http://localhost:5173/${payment.role}/settings/premium`);
       } else if (payment.source === "contactTutor") {
         res.redirect(
@@ -801,13 +815,12 @@ app.get("/users/:email", async (req, res) => {
       res.send(merged);
     });
 
-
     //paymentHistory-student + Hired Tutors
     app.get("/student/paidJobs/:studentEmail", async (req, res) => {
       const studentEmail = req.params.studentEmail;
 
       const payments = await paymentCollection
-        .find({ studentEmail, paidStatus: true }) 
+        .find({ studentEmail, paidStatus: true })
         .toArray();
 
       const paidJobIds = payments.map((p) => new ObjectId(p.jobId));
@@ -828,10 +841,6 @@ app.get("/users/:email", async (req, res) => {
       res.send(merged);
     });
 
- 
-
-
-
     app.post("/payments/multiple", async (req, res) => {
       const { jobIds } = req.body;
       if (!Array.isArray(jobIds))
@@ -850,56 +859,52 @@ app.get("/users/:email", async (req, res) => {
       }
     });
 
+    app.post("/verification", async (req, res) => {
+      try {
+        const {
+          name,
+          email,
+          phone,
+          customId,
+          idImage,
+          professionalId,
+          city,
+          location,
+        } = req.body;
 
+        // Check if already submitted
+        const existing = await VerificationCollection.findOne({ email });
+        if (existing) {
+          return res.status(400).json({ message: "Request already submitted" });
+        }
 
-app.post("/verification", async (req, res) => {
-  try {
-    const {
-      name,
-      email,
-      phone,
-      customId,
-      idImage,
-      professionalId,
-      city,
-      location,
-    } = req.body;
+        // insert directly (no constructor)
+        const newRequest = {
+          name,
+          email,
+          phone,
+          customId,
+          idImage,
+          professionalId,
+          city,
+          location,
+          createdAt: new Date(),
+        };
 
-    // Check if already submitted
-    const existing = await VerificationCollection.findOne({ email });
-    if (existing) {
-      return res.status(400).json({ message: "Request already submitted" });
-    }
+        await VerificationCollection.insertOne(newRequest);
 
-    // insert directly (no constructor)
-    const newRequest = {
-      name,
-      email,
-      phone,
-      customId,
-      idImage,
-      professionalId,
-      city,
-      location,
-      createdAt: new Date(),
-    };
+        res.status(201).json({ message: "Verification request submitted" });
+      } catch (error) {
+        console.error("Error saving request:", error);
+        res.status(500).json({ message: "Server error" });
+      }
+    });
 
-    await VerificationCollection.insertOne(newRequest);
-
-    res.status(201).json({ message: "Verification request submitted" });
-  } catch (error) {
-    console.error("Error saving request:", error);
-    res.status(500).json({ message: "Server error" });
-  }
-});
-
-
- app.get("/verification",  async (req, res) => {
+    app.get("/verification", async (req, res) => {
       //verifyToken,admin
       const verification = await VerificationCollection.find().toArray();
       res.send(verification);
     });
-
 
     //...........
     // Nominatim geocode proxy
