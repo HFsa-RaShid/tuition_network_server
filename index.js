@@ -636,6 +636,8 @@ async function run() {
         email,
         tutorId,
         amount,
+        tutorAmount,
+        tuToriaAmount,
         source,
         studentEmail,
         studentName,
@@ -683,6 +685,8 @@ async function run() {
           jobId,
           transactionId: tran_id,
           amount,
+          tutorAmount,
+        tuToriaAmount,
           email,
           tutorId,
           name,
@@ -940,7 +944,7 @@ async function run() {
     //............................Email
 
     app.post("/contact", (req, res) => {
-      const { tutorName, studentName, tutorEmail, studentEmail, message } =
+      const { tutorName, studentName, tutorEmail, studentEmail,studentPhone, message } =
         req.body;
 
       const transporter = nodemailer.createTransport({
@@ -966,6 +970,7 @@ Here are my details:
 
 Name: ${studentName}
 Email: ${studentEmail}
+Phone: ${studentPhone}
 
 Message:
 ${message}
