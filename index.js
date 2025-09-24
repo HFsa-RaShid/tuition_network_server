@@ -870,14 +870,7 @@ async function run() {
     app.post("/verification", async (req, res) => {
       try {
         const {
-          name,
-          email,
-          phone,
-          customId,
-          idImage,
-          professionalId,
-          city,
-          location,
+          name,email,phone,customId,idImage,NidImage,city,location,verificationStatus
         } = req.body;
 
         // Check if already submitted
@@ -893,9 +886,10 @@ async function run() {
           phone,
           customId,
           idImage,
-          professionalId,
+          NidImage,
           city,
           location,
+          verificationStatus,
           createdAt: new Date(),
         };
 
