@@ -322,6 +322,7 @@ async function run() {
           $or: [
             { name: { $regex: searchTerm, $options: "i" } },
             { email: { $regex: searchTerm, $options: "i" } },
+            { customId: { $regex: searchTerm, $options: "i" } },
           ],
         })
         .toArray();
@@ -870,7 +871,7 @@ async function run() {
     app.post("/verification", async (req, res) => {
       try {
         const {
-          name,email,phone,customId,idImage,NidImage,city,location,verificationStatus
+          name,email,phone,customId,idImage,NidImage,city,location,verificationStatus,userRole
         } = req.body;
 
         // Check if already submitted
@@ -890,6 +891,7 @@ async function run() {
           city,
           location,
           verificationStatus,
+          userRole,
           createdAt: new Date(),
         };
 
@@ -902,11 +904,100 @@ async function run() {
       }
     });
 
+    //.............................................//
+
     app.get("/verification", async (req, res) => {
       //verifyToken,admin
       const verification = await VerificationCollection.find().toArray();
       res.send(verification);
     });
+
+      // Approve verification
+app.put("/verification/approve/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const verification = await VerificationCollection.findOne({ _id: new ObjectId(id) });
+    if (!verification) return res.status(404).send({ message: "Verification not found" });
+
+    // update verification request
+    await VerificationCollection.updateOne(
+      { _id: new ObjectId(id) },
+      { $set: { verificationStatus: "approved" } }
+    );
+
+    // update users collection
+    await userCollection.updateOne(
+      { email: verification.email },
+      { $set: { verificationStatus: "approved" } }
+    );
+
+    // update tutors collection (if role tutor)
+    if (verification.userRole === "tutor") {
+      await tutorCollection.updateOne(
+        { email: verification.email },
+        { $set: { verificationStatus: "approved" } }
+      );
+    }
+
+    res.send({ success: true, message: "Verification approved" });
+  } catch (error) {
+    console.error(error);
+    res.status(500).send({ message: "Internal server error" });
+  }
+});
+
+// Reject verification
+app.delete("/verification/reject/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const verification = await VerificationCollection.findOne({ _id: new ObjectId(id) });
+    if (!verification) return res.status(404).send({ message: "Verification not found" });
+
+    // delete verification request
+    await VerificationCollection.deleteOne({ _id: new ObjectId(id) });
+
+    // update users collection
+    await userCollection.updateOne(
+      { email: verification.email },
+      { $set: { verificationStatus: "rejected" } }
+    );
+
+    // update tutors collection (if role tutor)
+    if (verification.userRole === "tutor") {
+      await tutorCollection.updateOne(
+        { email: verification.email },
+        { $set: { verificationStatus: "rejected" } }
+      );
+    }
+
+    // send rejection email
+    const transporter = nodemailer.createTransport({
+      service: "gmail",
+      auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS,
+      },
+    });
+
+    await transporter.sendMail({
+      from: `"TuToria" <${process.env.EMAIL_USER}>`,
+      to: verification.email,
+      subject: "Verification Rejected - Resubmit Required",
+      html: `
+        <p>Dear ${verification.name},</p>
+        <p>Your verification request has been <b>rejected</b>. Please ensure all details are correct and upload proper documents.</p>
+        <p>Then resubmit your verification request.</p>
+        <p>Thanks,<br/>TuToria Team</p>
+      `,
+    });
+
+    res.send({ success: true, message: "Verification rejected and email sent" });
+  } catch (error) {
+    console.error(error);
+    res.status(500).send({ message: "Internal server error" });
+  }
+});
+//........................................................//
 
     //...........
     // Nominatim geocode proxy
@@ -991,6 +1082,11 @@ ${studentName}
 
     //...............................................
 
+
+
+  
+
+//.......................................//
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
     console.log(
