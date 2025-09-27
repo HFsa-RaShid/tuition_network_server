@@ -134,7 +134,7 @@ async function run() {
     //   next();
     // };
 
-    app.get("/users", async (req, res) => {
+    app.get("/users",verifyAdmin,verifyToken, async (req, res) => {
       //verifyToken,admin
       const users = await userCollection.find().toArray();
       res.send(users);
@@ -281,7 +281,7 @@ async function run() {
       res.send(result);
     });
 
-    app.get("/tutors", async (req, res) => {
+    app.get("/tutors",verifyAdmin,verifyToken, async (req, res) => {
       const tutors = await tutorCollection.find().toArray();
       res.send(tutors);
     });
@@ -1088,10 +1088,10 @@ ${studentName}
 
 //.......................................//
     // Send a ping to confirm a successful connection
-    await client.db("admin").command({ ping: 1 });
-    console.log(
-      "Pinged your deployment. You successfully connected to MongoDB!"
-    );
+    // await client.db("admin").command({ ping: 1 });
+    // console.log(
+    //   "Pinged your deployment. You successfully connected to MongoDB!"
+    // );
   } finally {
     // Ensures that the client will close when you finish/error
     // await client.close();
