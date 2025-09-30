@@ -134,7 +134,7 @@ async function run() {
     //   next();
     // };
 
-    app.get("/users",verifyAdmin,verifyToken, async (req, res) => {
+    app.get("/users", async (req, res) => {
       //verifyToken,admin
       const users = await userCollection.find().toArray();
       res.send(users);
@@ -281,7 +281,7 @@ async function run() {
       res.send(result);
     });
 
-    app.get("/tutors",verifyAdmin,verifyToken, async (req, res) => {
+    app.get("/tutors", async (req, res) => {
       const tutors = await tutorCollection.find().toArray();
       res.send(tutors);
     });
@@ -651,10 +651,10 @@ async function run() {
         total_amount: amount,
         currency: "BDT",
         tran_id,
-        success_url: `http://localhost:5000/payment/success/${tran_id}`,
-        fail_url: `http://localhost:5000/payment/fail/${tran_id}`,
-        cancel_url: `http://localhost:5000/paymentCancel`,
-        ipn_url: `http://localhost:5000/ipn`,
+        success_url: `https://tutoria-server.vercel.app/payment/success/${tran_id}`,
+        fail_url: `https://tutoria-server.vercel.app/payment/fail/${tran_id}`,
+        cancel_url: `https://tutoria-server.vercel.app/paymentCancel`,
+        ipn_url: `https://tutoria-server.vercel.app/ipn`,
         shipping_method: "Courier",
         product_name: productName,
         product_category: "Tuition",
@@ -687,7 +687,7 @@ async function run() {
           transactionId: tran_id,
           amount,
           tutorAmount,
-        tuToriaAmount,
+          tuToriaAmount,
           email,
           tutorId,
           name,
@@ -717,23 +717,23 @@ async function run() {
 
       if (payment.source === "myApplications") {
         res.redirect(
-          `http://localhost:5173/tutor/payment/success/${req.params.tranId}`
+          `https://tuitionnetwork-7f3a8.web.app/tutor/payment/success/${req.params.tranId}`
         );
       } else if (payment.source === "trialClassPayment") {
         res.redirect(
-          `http://localhost:5173/student/payment/success/${req.params.tranId}`
+          `https://tuitionnetwork-7f3a8.web.app/student/payment/success/${req.params.tranId}`
         );
       } else if (payment.source === "advanceSalary") {
         res.redirect(
-          `http://localhost:5173/student/payment/success/${req.params.tranId}`
+          `https://tuitionnetwork-7f3a8.web.app/student/payment/success/${req.params.tranId}`
         );
       } else if (payment.source === "getPremium") {
         res.redirect(
-          `http://localhost:5173/${payment.role}/payment/success/${req.params.tranId}`
+          `https://tuitionnetwork-7f3a8.web.app/${payment.role}/payment/success/${req.params.tranId}`
         );
       } else if (payment.source === "contactTutor") {
         res.redirect(
-          `http://localhost:5173/payment/success/${req.params.tranId}`
+          `https://tuitionnetwork-7f3a8.web.app/payment/success/${req.params.tranId}`
         );
       }
     });
@@ -751,16 +751,24 @@ async function run() {
       await paymentCollection.deleteOne({ transactionId: req.params.tranId });
 
       if (payment.source === "myApplications") {
-        res.redirect(`http://localhost:5173/tutor/myApplications`);
+        res.redirect(
+          `https://tuitionnetwork-7f3a8.web.app/tutor/myApplications`
+        );
       } else if (payment.source === "trialClassPayment") {
-        res.redirect(`http://localhost:5173/student/hired-tutors`);
+        res.redirect(
+          `https://tuitionnetwork-7f3a8.web.app/student/hired-tutors`
+        );
       } else if (payment.source === "advanceSalary") {
-        res.redirect(`http://localhost:5173/student/hired-tutors`);
+        res.redirect(
+          `https://tuitionnetwork-7f3a8.web.app/student/hired-tutors`
+        );
       } else if (payment.source === "getPremium") {
-        res.redirect(`http://localhost:5173/${payment.role}/settings/premium`);
+        res.redirect(
+          `https://tuitionnetwork-7f3a8.web.app/${payment.role}/settings/premium`
+        );
       } else if (payment.source === "contactTutor") {
         res.redirect(
-          `http://localhost:5173/tutors/tutor-profile/${payment.tutorId}`
+          `https://tuitionnetwork-7f3a8.web.app/tutors/tutor-profile/${payment.tutorId}`
         );
       }
     });
@@ -871,7 +879,16 @@ async function run() {
     app.post("/verification", async (req, res) => {
       try {
         const {
-          name,email,phone,customId,idImage,NidImage,city,location,verificationStatus,userRole
+          name,
+          email,
+          phone,
+          customId,
+          idImage,
+          NidImage,
+          city,
+          location,
+          verificationStatus,
+          userRole,
         } = req.body;
 
         // Check if already submitted
@@ -912,92 +929,101 @@ async function run() {
       res.send(verification);
     });
 
-      // Approve verification
-app.put("/verification/approve/:id", async (req, res) => {
-  try {
-    const { id } = req.params;
-    const verification = await VerificationCollection.findOne({ _id: new ObjectId(id) });
-    if (!verification) return res.status(404).send({ message: "Verification not found" });
+    // Approve verification
+    app.put("/verification/approve/:id", async (req, res) => {
+      try {
+        const { id } = req.params;
+        const verification = await VerificationCollection.findOne({
+          _id: new ObjectId(id),
+        });
+        if (!verification)
+          return res.status(404).send({ message: "Verification not found" });
 
-    // update verification request
-    await VerificationCollection.updateOne(
-      { _id: new ObjectId(id) },
-      { $set: { verificationStatus: "approved" } }
-    );
+        // update verification request
+        await VerificationCollection.updateOne(
+          { _id: new ObjectId(id) },
+          { $set: { verificationStatus: "approved" } }
+        );
 
-    // update users collection
-    await userCollection.updateOne(
-      { email: verification.email },
-      { $set: { verificationStatus: "approved" } }
-    );
+        // update users collection
+        await userCollection.updateOne(
+          { email: verification.email },
+          { $set: { verificationStatus: "approved" } }
+        );
 
-    // update tutors collection (if role tutor)
-    if (verification.userRole === "tutor") {
-      await tutorCollection.updateOne(
-        { email: verification.email },
-        { $set: { verificationStatus: "approved" } }
-      );
-    }
+        // update tutors collection (if role tutor)
+        if (verification.userRole === "tutor") {
+          await tutorCollection.updateOne(
+            { email: verification.email },
+            { $set: { verificationStatus: "approved" } }
+          );
+        }
 
-    res.send({ success: true, message: "Verification approved" });
-  } catch (error) {
-    console.error(error);
-    res.status(500).send({ message: "Internal server error" });
-  }
-});
-
-// Reject verification
-app.delete("/verification/reject/:id", async (req, res) => {
-  try {
-    const { id } = req.params;
-    const verification = await VerificationCollection.findOne({ _id: new ObjectId(id) });
-    if (!verification) return res.status(404).send({ message: "Verification not found" });
-
-    // delete verification request
-    await VerificationCollection.deleteOne({ _id: new ObjectId(id) });
-
-    // update users collection
-    await userCollection.updateOne(
-      { email: verification.email },
-      { $set: { verificationStatus: "rejected" } }
-    );
-
-    // update tutors collection (if role tutor)
-    if (verification.userRole === "tutor") {
-      await tutorCollection.updateOne(
-        { email: verification.email },
-        { $set: { verificationStatus: "rejected" } }
-      );
-    }
-
-    // send rejection email
-    const transporter = nodemailer.createTransport({
-      service: "gmail",
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS,
-      },
+        res.send({ success: true, message: "Verification approved" });
+      } catch (error) {
+        console.error(error);
+        res.status(500).send({ message: "Internal server error" });
+      }
     });
 
-    await transporter.sendMail({
-      from: `"TuToria" <${process.env.EMAIL_USER}>`,
-      to: verification.email,
-      subject: "Verification Rejected - Resubmit Required",
-      html: `
+    // Reject verification
+    app.delete("/verification/reject/:id", async (req, res) => {
+      try {
+        const { id } = req.params;
+        const verification = await VerificationCollection.findOne({
+          _id: new ObjectId(id),
+        });
+        if (!verification)
+          return res.status(404).send({ message: "Verification not found" });
+
+        // delete verification request
+        await VerificationCollection.deleteOne({ _id: new ObjectId(id) });
+
+        // update users collection
+        await userCollection.updateOne(
+          { email: verification.email },
+          { $set: { verificationStatus: "rejected" } }
+        );
+
+        // update tutors collection (if role tutor)
+        if (verification.userRole === "tutor") {
+          await tutorCollection.updateOne(
+            { email: verification.email },
+            { $set: { verificationStatus: "rejected" } }
+          );
+        }
+
+        // send rejection email
+        const transporter = nodemailer.createTransport({
+          service: "gmail",
+          auth: {
+            user: process.env.EMAIL_USER,
+            pass: process.env.EMAIL_PASS,
+          },
+        });
+
+        await transporter.sendMail({
+          from: `"TuToria" <${process.env.EMAIL_USER}>`,
+          to: verification.email,
+          subject: "Verification Rejected - Resubmit Required",
+          html: `
         <p>Dear ${verification.name},</p>
         <p>Your verification request has been <b>rejected</b>. Please ensure all details are correct and upload proper documents.</p>
         <p>Then resubmit your verification request.</p>
         <p>Thanks,<br/>TuToria Team</p>
       `,
-    });
+        });
 
-    res.send({ success: true, message: "Verification rejected and email sent" });
-  } catch (error) {
-    console.error(error);
-    res.status(500).send({ message: "Internal server error" });
-  }
-});
-//........................................................//
+        res.send({
+          success: true,
+          message: "Verification rejected and email sent",
+        });
+      } catch (error) {
+        console.error(error);
+        res.status(500).send({ message: "Internal server error" });
+      }
+    });
+    //........................................................//
 
     //...........
     // Nominatim geocode proxy
@@ -1014,7 +1040,7 @@ app.delete("/verification/reject/:id", async (req, res) => {
           {
             headers: {
               "Accept-Language": "en",
-              "User-Agent": "tuToria (hafsa.cse28gmail.com)",
+              "User-Agent": "tuToria (contact: hafsa.cse28gmail.com)",
             },
           }
         );
@@ -1029,8 +1055,14 @@ app.delete("/verification/reject/:id", async (req, res) => {
     //............................Email
 
     app.post("/contact", (req, res) => {
-      const { tutorName, studentName, tutorEmail, studentEmail,studentPhone, message } =
-        req.body;
+      const {
+        tutorName,
+        studentName,
+        tutorEmail,
+        studentEmail,
+        studentPhone,
+        message,
+      } = req.body;
 
       const transporter = nodemailer.createTransport({
         service: "gmail",
@@ -1082,16 +1114,12 @@ ${studentName}
 
     //...............................................
 
-
-
-  
-
-//.......................................//
+    //.......................................//
     // Send a ping to confirm a successful connection
     // await client.db("admin").command({ ping: 1 });
-    // console.log(
-    //   "Pinged your deployment. You successfully connected to MongoDB!"
-    // );
+    console.log(
+      "Pinged your deployment. You successfully connected to MongoDB!"
+    );
   } finally {
     // Ensures that the client will close when you finish/error
     // await client.close();
