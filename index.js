@@ -407,6 +407,7 @@ async function run() {
 
       try {
         let result;
+
         if (tutorStatus) {
           result = await tutorRequestCollection.updateOne(
             { _id: new ObjectId(id) },
@@ -445,6 +446,7 @@ async function run() {
               .send({ message: "Already applied or request not found." });
           }
         }
+
         // Updating tutor request status by admin
         if (status !== undefined) {
           let updateQuery;
@@ -461,15 +463,84 @@ async function run() {
           );
 
           if (result.modifiedCount > 0) {
+            if (status === "approved") {
+              const request = await tutorRequestCollection.findOne({
+                _id: new ObjectId(id),
+              });
+
+              const premiumTutors = await tutorCollection
+                .find({
+                  role: "tutor",
+                  profileStatus: "Premium",
+                  city: request.city,
+                  location: request.location,
+                })
+                .toArray();
+
+              if (premiumTutors.length > 0) {
+                const transporter = nodemailer.createTransport({
+                  service: "gmail",
+                  auth: {
+                    user: process.env.EMAIL_USER,
+                    pass: process.env.EMAIL_PASS,
+                  },
+                });
+
+                for (const tutor of premiumTutors) {
+                  const mailOptions = {
+                    from: `"TuToria" <${process.env.EMAIL_USER}>`,
+                    to: tutor.email,
+                    subject: "New Approved Tuition in Your Area!",
+                    html: `<div style="max-width:600px;margin:auto;font-family:Arial,Helvetica,sans-serif;border:1px solid #e0e0e0;border-radius:10px;overflow:hidden;box-shadow:0 4px 12px rgba(0,0,0,0.1)">
+                          <div style="background:#4f46e5;color:#fff;padding:15px 20px;font-size:20px;font-weight:bold;text-align:center">
+                            🎉 New Tuition Opportunity Approved!
+                          </div>
+                          <div style="padding:20px;background:#fafafa">
+                            <h2 style="color:#333;margin:0 0 10px">📚 ${
+                              request.classCourse
+                            } Tuition</h2>
+                            <p><strong>City:</strong> ${request.city}</p>
+                            <p><strong>Location:</strong> ${request.location}</p>
+                            <p><strong>Subjects:</strong> ${request.subjects?.join(", ")}</p>
+                            <p><strong>Salary:</strong> ${request.salary} Tk/Month</p>
+                            <p><strong>Duration:</strong> ${
+                              request.duration || "Not Specified"
+                            }</p>
+                          </div>
+                          <div style="padding:20px;text-align:center;background:#fff">
+                            <a href="https://your-client-url.com/tutor-request/${id}"
+                              style="display:inline-block;padding:12px 25px;background:#4f46e5;color:#fff;text-decoration:none;border-radius:6px;font-size:16px;font-weight:bold">
+                              👉 Apply Now
+                            </a>
+                            <p style="margin-top:15px;font-size:13px;color:#888">
+                              This is an automated email. Please do not reply.
+                            </p>
+                          </div>
+                        </div>`,
+                  };
+
+                  try {
+                    const info = await transporter.sendMail(mailOptions);
+                    console.log("Email sent:", info.response);
+                  } catch (err) {
+                    console.error("Email send error:", err);
+                  }
+                }
+              } else {
+                console.log("No premium tutors found in the area.");
+              }
+            }
             return res.send({ message: "Status updated successfully." });
           } else {
             return res
+
               .status(404)
               .send({ message: "Request not found or not modified." });
           }
         }
 
-        // Updating tutor details or changing request status
+        // tutorStatus, confirm, cancelConfirmation
+
         if (tutorStatus !== undefined) {
           let updateQuery;
 
@@ -567,7 +638,6 @@ async function run() {
           .status(400)
           .send({ message: "Nothing to update. Provide valid fields." });
       } catch (error) {
-        // Log the detailed error and send a generic message to the client
         console.error("Error in PUT /tutorRequests/:id:", error);
         return res
           .status(500)
