@@ -717,23 +717,23 @@ async function run() {
 
       if (payment.source === "myApplications") {
         res.redirect(
-          `https://tuitionnetwork-7f3a8.web.app/tutor/payment/success/${req.params.tranId}`
+          `https://tutoria-jet.vercel.app/tutor/payment/success/${req.params.tranId}`
         );
       } else if (payment.source === "trialClassPayment") {
         res.redirect(
-          `https://tuitionnetwork-7f3a8.web.app/student/payment/success/${req.params.tranId}`
+          `https://tutoria-jet.vercel.app/student/payment/success/${req.params.tranId}`
         );
       } else if (payment.source === "advanceSalary") {
         res.redirect(
-          `https://tuitionnetwork-7f3a8.web.app/student/payment/success/${req.params.tranId}`
+          `https://tutoria-jet.vercel.app/student/payment/success/${req.params.tranId}`
         );
       } else if (payment.source === "getPremium") {
         res.redirect(
-          `https://tuitionnetwork-7f3a8.web.app/${payment.role}/payment/success/${req.params.tranId}`
+          `https://tutoria-jet.vercel.app/${payment.role}/payment/success/${req.params.tranId}`
         );
       } else if (payment.source === "contactTutor") {
         res.redirect(
-          `https://tuitionnetwork-7f3a8.web.app/payment/success/${req.params.tranId}`
+          `https://tutoria-jet.vercel.app/payment/success/${req.params.tranId}`
         );
       }
     });
@@ -751,24 +751,18 @@ async function run() {
       await paymentCollection.deleteOne({ transactionId: req.params.tranId });
 
       if (payment.source === "myApplications") {
-        res.redirect(
-          `https://tuitionnetwork-7f3a8.web.app/tutor/myApplications`
-        );
+        res.redirect(`https://tutoria-jet.vercel.app/tutor/myApplications`);
       } else if (payment.source === "trialClassPayment") {
-        res.redirect(
-          `https://tuitionnetwork-7f3a8.web.app/student/hired-tutors`
-        );
+        res.redirect(`https://tutoria-jet.vercel.app/student/hired-tutors`);
       } else if (payment.source === "advanceSalary") {
-        res.redirect(
-          `https://tuitionnetwork-7f3a8.web.app/student/hired-tutors`
-        );
+        res.redirect(`https://tutoria-jet.vercel.app/student/hired-tutors`);
       } else if (payment.source === "getPremium") {
         res.redirect(
-          `https://tuitionnetwork-7f3a8.web.app/${payment.role}/settings/premium`
+          `https://tutoria-jet.vercel.app/${payment.role}/settings/premium`
         );
       } else if (payment.source === "contactTutor") {
         res.redirect(
-          `https://tuitionnetwork-7f3a8.web.app/tutors/tutor-profile/${payment.tutorId}`
+          `https://tutoria-jet.vercel.app/tutors/tutor-profile/${payment.tutorId}`
         );
       }
     });
