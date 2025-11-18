@@ -2,6 +2,7 @@ const express = require("express");
 require("dotenv").config();
 const cors = require("cors");
 const axios = require("axios");
+  const crypto = require("crypto");
 const nodemailer = require("nodemailer");
 const SSLCommerzPayment = require("sslcommerz-lts");
 const jwt = require("jsonwebtoken");
@@ -45,6 +46,13 @@ async function run() {
     const VerificationCollection = client
       .db("tuitionNetworkDB")
       .collection("VerificationRequest");
+    const tempVerificationCollection = client
+      .db("tuitionNetworkDB")
+      .collection("tempVerifications");
+    const noticeCollection = client
+      .db("tuitionNetworkDB")
+      .collection("dashboardNotices");
+
 
     // ------------------ Custom ID Generator ------------------
     async function generateCustomId(role, collection) {
@@ -67,19 +75,178 @@ async function run() {
     }
 
     // ------------------ Custom Tuition ID Generator ------------------
-    async function generateTuitionId(collection) {
+    async function generateTuitionIds(collection, count = 1) {
+      if (count < 1) {
+        return [];
+      }
+
       const lastRequest = await collection
         .find({})
         .sort({ createdAt: -1 })
         .limit(1)
         .toArray();
 
-      let newNumber = 1;
+      let lastNumber = 0;
       if (lastRequest.length > 0 && lastRequest[0].tuitionId) {
-        newNumber = parseInt(lastRequest[0].tuitionId) + 1;
+        const parsed = parseInt(lastRequest[0].tuitionId, 10);
+        if (!Number.isNaN(parsed)) {
+          lastNumber = parsed;
+        }
       }
 
-      return `${newNumber}`;
+      return Array.from({ length: count }, (_, idx) => `${lastNumber + idx + 1}`);
+    }
+
+    async function generateTuitionId(collection) {
+      const [nextId] = await generateTuitionIds(collection, 1);
+      return nextId;
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+    const sanitizeString = (value) => {
+      if (typeof value === "string") {
+        return value.trim();
+      }
+      if (typeof value === "number") {
+        return value.toString().trim();
+      }
+      return "";
+    };
+
+    const normalizeEmail = (value) => {
+      const email = sanitizeString(value).toLowerCase();
+      return emailRegex.test(email) ? email : "";
+    };
+
+    const coerceNumber = (value) => {
+      if (value === undefined || value === null) {
+        return null;
+      }
+
+      if (typeof value === "number" && Number.isFinite(value)) {
+        return value;
+      }
+
+      if (typeof value === "string") {
+        const numericPortion = value.replace(/[^0-9.]/g, "");
+        if (!numericPortion) {
+          return null;
+        }
+        const parsed = Number(numericPortion);
+        return Number.isFinite(parsed) ? parsed : null;
+      }
+
+      return null;
+    };
+
+    const toPositiveNumber = (value) => {
+      const num = coerceNumber(value);
+      if (!Number.isFinite(num) || num <= 0) {
+        return null;
+      }
+      return num;
+    };
+
+    const normalizeSubjects = (subjects) => {
+      if (!subjects) {
+        return [];
+      }
+
+      if (Array.isArray(subjects)) {
+        return subjects.map(sanitizeString).filter(Boolean);
+      }
+
+      if (typeof subjects === "string") {
+        return subjects
+          .split(",")
+          .map(sanitizeString)
+          .filter(Boolean);
+      }
+
+      return [];
+    };
+
+    function validateTutorRequestPayload(payload) {
+      if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+        return {
+          isValid: false,
+          errors: ["Each tutor request must be an object"],
+          sanitized: null,
+        };
+      }
+
+      const errors = [];
+      const sanitized = { ...payload };
+
+      sanitized.studentEmail = normalizeEmail(payload.studentEmail || payload.email);
+      if (!sanitized.studentEmail) {
+        errors.push("studentEmail is required and must be valid");
+      }
+
+      sanitized.studentName = sanitizeString(payload.studentName || payload.name);
+      if (!sanitized.studentName) {
+        errors.push("studentName is required");
+      }
+
+      sanitized.phone =
+        sanitizeString(
+          payload.phone || payload.contactNumber || payload.guardianPhone || payload.mobile
+        );
+      if (!sanitized.phone) {
+        errors.push("phone is required");
+      }
+
+      sanitized.city = sanitizeString(payload.city);
+      if (!sanitized.city) {
+        errors.push("city is required");
+      }
+
+      sanitized.location = sanitizeString(payload.location);
+      if (!sanitized.location) {
+        errors.push("location is required");
+      }
+
+      sanitized.classCourse = sanitizeString(payload.classCourse || payload.classLevel);
+      if (!sanitized.classCourse) {
+        errors.push("classCourse is required");
+      }
+
+      const subjects = normalizeSubjects(payload.subjects || payload.subject);
+      if (!subjects.length) {
+        errors.push("subjects must include at least one value");
+      } else {
+        sanitized.subjects = subjects;
+      }
+
+      const salary = toPositiveNumber(payload.salary);
+      if (salary === null) {
+        errors.push("salary must be a positive number");
+      } else {
+        sanitized.salary = salary;
+      }
+
+      const daysPerWeek = toPositiveNumber(payload.daysPerWeek);
+      if (daysPerWeek !== null) {
+        sanitized.daysPerWeek = daysPerWeek;
+      }
+
+      const weeklyDuration = toPositiveNumber(payload.weeklyDuration);
+      if (weeklyDuration !== null) {
+        sanitized.weeklyDuration = weeklyDuration;
+      }
+
+      sanitized.description = sanitizeString(payload.description);
+
+      delete sanitized.tuitionId;
+      delete sanitized.createdAt;
+      delete sanitized.appliedTutors;
+
+      return {
+        isValid: errors.length === 0,
+        errors,
+        sanitized,
+      };
     }
 
     //............................................
@@ -140,7 +307,7 @@ async function run() {
       res.send(users);
     });
 
-    app.put("/users/:email", verifyToken, async (req, res) => {
+    app.put("/users/:email",verifyToken, async (req, res) => {
       const email = req.params.email;
       const updatedData = req.body;
 
@@ -163,7 +330,7 @@ async function run() {
           return res.status(404).send({ error: "User not found" });
         }
 
-        // ✅ Auto-check subscription expiry
+        // Auto-check subscription expiry
         if (user.profileStatus === "Premium") {
           const lastPayment = await paymentCollection.findOne(
             { email, source: "getPremium", paidStatus: true },
@@ -193,20 +360,7 @@ async function run() {
       }
     });
 
-    // app.get("/users/:email", async (req, res) => {
-    //   try {
-    //     const email = req.params.email;
-    //     const user = await userCollection.findOne({ email });
 
-    //     if (user) {
-    //       res.send(user);
-    //     } else {
-    //       res.status(404).send({ message: "User not found" });
-    //     }
-    //   } catch (error) {
-    //     res.status(500).send({ message: "Internal server error" });
-    //   }
-    // });
 
     app.post("/users", async (req, res) => {
       const user = req.body;
@@ -223,6 +377,7 @@ async function run() {
       const newUser = {
         ...user,
         customId,
+         
         createdAt: new Date(),
       };
 
@@ -245,6 +400,8 @@ async function run() {
       const newTutor = {
         ...tutor,
         customId,
+  
+    
         createdAt: new Date(),
       };
 
@@ -252,7 +409,91 @@ async function run() {
       res.send({ ...result, customId });
     });
 
-    //.....................
+
+    //.....................//
+  
+app.post("/send-verification", async (req, res) => {
+  const { email } = req.body;
+
+  if (!email) {
+    return res.status(400).send({ message: "Email is required" });
+  }
+
+  try {
+    // Generate 6-digit code
+    const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiry = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
+
+    // Save or update verification code for this email
+    await tempVerificationCollection.updateOne(
+      { email },
+      { $set: { verificationCode, verificationExpires: expiry } },
+      { upsert: true }
+    );
+
+    // Setup mail transporter
+    const transporter = nodemailer.createTransport({
+      service: "gmail",
+      auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS,
+      },
+    });
+
+    const mailOptions = {
+      from: `"TuToria" <${process.env.EMAIL_USER}>`,
+      to: email,
+      subject: "Your TuToria Email Verification Code",
+      html: `
+        <div style="font-family:Arial;padding:20px;background:#f7f9fc;">
+          <h2>Here’s your TuToria verification code</h2>
+          <h1 style="color:#2563eb;font-size:32px;">${verificationCode}</h1>
+          <p>This code will expire in <b>5 minutes</b>.</p>
+        </div>
+      `,
+    };
+
+    await transporter.sendMail(mailOptions);
+
+    res.send({ message: "Verification code sent successfully!" });
+  } catch (error) {
+    console.error("Error sending verification:", error);
+    res.status(500).send({ message: "Failed to send verification code" });
+  }
+});
+
+
+
+
+   app.post("/verify-code", async (req, res) => {
+  const { email, code } = req.body;
+
+  try {
+    const record = await tempVerificationCollection.findOne({ email });
+    if (!record) return res.status(404).send({ message: "No verification request found" });
+
+    const now = new Date();
+    if (now > new Date(record.verificationExpires)) {
+      return res.status(400).send({ message: "Verification code expired" });
+    }
+
+    if (record.verificationCode !== code) {
+      return res.status(400).send({ message: "Invalid verification code" });
+    }
+
+    // Code correct — verification complete
+    await tempVerificationCollection.deleteOne({ email });
+
+    res.send({ message: "Email verified successfully!" });
+  } catch (error) {
+    console.error("Error verifying code:", error);
+    res.status(500).send({ message: "Server error during verification" });
+  }
+});
+
+
+
+//...............//
 
     app.put("/tutors/:email", verifyToken, async (req, res) => {
       const email = req.params.email;
@@ -329,27 +570,88 @@ async function run() {
       res.send(users);
     });
 
-    // Post tutor request
+    // Post tutor request (single or bulk)
 
     app.post("/tutorRequests", verifyToken, async (req, res) => {
       try {
-        const tutorRequest = req.body;
+        const payload = req.body;
+
+        if (Array.isArray(payload)) {
+          if (payload.length === 0) {
+            return res
+              .status(400)
+              .send({ message: "Payload array must contain at least one request" });
+          }
+
+          const validationResults = payload.map((item, index) => ({
+            index,
+            ...validateTutorRequestPayload(item),
+          }));
+
+          const validItems = validationResults
+            .filter((entry) => entry.isValid)
+            .map((entry) => entry.sanitized);
+
+          if (validItems.length === 0) {
+            return res.status(422).send({
+              message: "All tutor requests failed validation",
+              errors: validationResults.map(({ index, errors }) => ({ index, errors })),
+            });
+          }
+
+          const tuitionIds = await generateTuitionIds(
+            tutorRequestCollection,
+            validItems.length
+          );
+
+          const docsToInsert = validItems.map((item, idx) => ({
+            ...item,
+            tuitionId: tuitionIds[idx],
+            createdAt: new Date(),
+          }));
+
+          const insertResult = await tutorRequestCollection.insertMany(docsToInsert);
+
+          const rejected = validationResults
+            .filter((entry) => !entry.isValid)
+            .map(({ index, errors }) => ({ index, errors }));
+
+          return res.status(rejected.length ? 207 : 201).send({
+            message: rejected.length
+              ? "Tutor requests processed with some validation failures"
+              : "Tutor requests submitted successfully",
+            insertedCount: insertResult.insertedCount,
+            insertedIds: Object.values(insertResult.insertedIds).map((id) =>
+              id.toString()
+            ),
+            rejected,
+          });
+        }
+
+        const { isValid, errors, sanitized } = validateTutorRequestPayload(payload);
+
+        if (!isValid) {
+          return res.status(422).send({
+            message: "Validation failed",
+            errors,
+          });
+        }
 
         const tuitionId = await generateTuitionId(tutorRequestCollection);
-        tutorRequest.tuitionId = tuitionId;
 
         const result = await tutorRequestCollection.insertOne({
-          ...tutorRequest,
+          ...sanitized,
+          tuitionId,
           createdAt: new Date(),
         });
 
         res.status(201).send({
           message: "Tutor request submitted successfully",
           insertedId: result.insertedId,
-          tuitionId: tutorRequest.tuitionId,
+          tuitionId,
         });
       } catch (error) {
-        console.error(error);
+        console.error("Error submitting tutor request:", error);
         res.status(500).send({ message: "Error submitting tutor request" });
       }
     });
@@ -500,9 +802,15 @@ async function run() {
                               request.classCourse
                             } Tuition</h2>
                             <p><strong>City:</strong> ${request.city}</p>
-                            <p><strong>Location:</strong> ${request.location}</p>
-                            <p><strong>Subjects:</strong> ${request.subjects?.join(", ")}</p>
-                            <p><strong>Salary:</strong> ${request.salary} Tk/Month</p>
+                            <p><strong>Location:</strong> ${
+                              request.location
+                            }</p>
+                            <p><strong>Subjects:</strong> ${request.subjects?.join(
+                              ", "
+                            )}</p>
+                            <p><strong>Salary:</strong> ${
+                              request.salary
+                            } Tk/Month</p>
                             <p><strong>Duration:</strong> ${
                               request.duration || "Not Specified"
                             }</p>
@@ -721,10 +1029,10 @@ async function run() {
         total_amount: amount,
         currency: "BDT",
         tran_id,
-        success_url: `https://tutoria-server.vercel.app/payment/success/${tran_id}`,
-        fail_url: `https://tutoria-server.vercel.app/payment/fail/${tran_id}`,
-        cancel_url: `https://tutoria-server.vercel.app/paymentCancel`,
-        ipn_url: `https://tutoria-server.vercel.app/ipn`,
+        success_url: `http://localhost:5000/payment/success/${tran_id}`,
+        fail_url: `http://localhost:5000/payment/fail/${tran_id}`,
+        cancel_url: `http://localhost:5000/paymentCancel`,
+        ipn_url: `http://localhost:5000/ipn`,
         shipping_method: "Courier",
         product_name: productName,
         product_category: "Tuition",
@@ -787,23 +1095,23 @@ async function run() {
 
       if (payment.source === "myApplications") {
         res.redirect(
-          `https://tutoria-jet.vercel.app/tutor/payment/success/${req.params.tranId}`
+          `http://localhost:5173/tutor/payment/success/${req.params.tranId}`
         );
       } else if (payment.source === "trialClassPayment") {
         res.redirect(
-          `https://tutoria-jet.vercel.app/student/payment/success/${req.params.tranId}`
+          `http://localhost:5173/student/payment/success/${req.params.tranId}`
         );
       } else if (payment.source === "advanceSalary") {
         res.redirect(
-          `https://tutoria-jet.vercel.app/student/payment/success/${req.params.tranId}`
+          `http://localhost:5173/student/payment/success/${req.params.tranId}`
         );
       } else if (payment.source === "getPremium") {
         res.redirect(
-          `https://tutoria-jet.vercel.app/${payment.role}/payment/success/${req.params.tranId}`
+          `http://localhost:5173/${payment.role}/payment/success/${req.params.tranId}`
         );
       } else if (payment.source === "contactTutor") {
         res.redirect(
-          `https://tutoria-jet.vercel.app/payment/success/${req.params.tranId}`
+          `http://localhost:5173/payment/success/${req.params.tranId}`
         );
       }
     });
@@ -821,18 +1129,16 @@ async function run() {
       await paymentCollection.deleteOne({ transactionId: req.params.tranId });
 
       if (payment.source === "myApplications") {
-        res.redirect(`https://tutoria-jet.vercel.app/tutor/myApplications`);
+        res.redirect(`http://localhost:5173/tutor/myApplications`);
       } else if (payment.source === "trialClassPayment") {
-        res.redirect(`https://tutoria-jet.vercel.app/student/hired-tutors`);
+        res.redirect(`http://localhost:5173/student/hired-tutors`);
       } else if (payment.source === "advanceSalary") {
-        res.redirect(`https://tutoria-jet.vercel.app/student/hired-tutors`);
+        res.redirect(`http://localhost:5173/student/hired-tutors`);
       } else if (payment.source === "getPremium") {
-        res.redirect(
-          `https://tutoria-jet.vercel.app/${payment.role}/settings/premium`
-        );
+        res.redirect(`http://localhost:5173/${payment.role}/settings/premium`);
       } else if (payment.source === "contactTutor") {
         res.redirect(
-          `https://tutoria-jet.vercel.app/tutors/tutor-profile/${payment.tutorId}`
+          `http://localhost:5173/tutors/tutor-profile/${payment.tutorId}`
         );
       }
     });
@@ -1175,6 +1481,130 @@ ${studentName}
         }
       });
     });
+
+    // Dashboard notices
+    app.get("/notices", async (req, res) => {
+      try {
+        const notices = await noticeCollection
+          .find({})
+          .sort({ createdAt: -1 })
+          .toArray();
+        res.send(notices);
+      } catch (error) {
+        console.error("Error fetching notices:", error);
+        res.status(500).send({ message: "Failed to fetch notices" });
+      }
+    });
+
+    app.post("/notices", verifyToken, verifyAdmin, async (req, res) => {
+      try {
+        const { title, message, audience = "all", priority = "normal" } =
+          req.body || {};
+
+        if (!title || !message) {
+          return res
+            .status(400)
+            .send({ message: "Title and message are required" });
+        }
+
+        const doc = {
+          title: title.trim(),
+          message: message.trim(),
+          audience,
+          priority,
+          createdAt: new Date(),
+        };
+
+        const result = await noticeCollection.insertOne(doc);
+        res
+          .status(201)
+          .send({ insertedId: result.insertedId, message: "Notice posted" });
+      } catch (error) {
+        console.error("Error posting notice:", error);
+        res.status(500).send({ message: "Failed to post notice" });
+      }
+    });
+
+    app.delete("/notices/:id", verifyToken, verifyAdmin, async (req, res) => {
+      try {
+        const { id } = req.params;
+        const result = await noticeCollection.deleteOne({
+          _id: new ObjectId(id),
+        });
+
+        if (result.deletedCount === 0) {
+          return res.status(404).send({ message: "Notice not found" });
+        }
+
+        res.send({ message: "Notice removed" });
+      } catch (error) {
+        console.error("Error deleting notice:", error);
+        res.status(500).send({ message: "Failed to delete notice" });
+      }
+    });
+
+    app.get(
+      "/admin/stats-summary",
+      verifyToken,
+      verifyAdmin,
+      async (req, res) => {
+        try {
+          const [
+            totalUsers,
+            totalTutors,
+            totalRequests,
+            pendingRequests,
+            totalPayments,
+          ] = await Promise.all([
+            userCollection.countDocuments(),
+            tutorCollection.countDocuments(),
+            tutorRequestCollection.countDocuments(),
+            tutorRequestCollection.countDocuments({ status: "pending" }),
+            paymentCollection.countDocuments({ paidStatus: true }),
+          ]);
+
+          const recentPayments = await paymentCollection
+            .find({ paidStatus: true })
+            .sort({ paymentTime: -1 })
+            .limit(6)
+            .toArray();
+
+          const revenueSummary = recentPayments.reduce(
+            (acc, payment) => {
+              acc.total += payment.amount || 0;
+              acc.tutor += payment.tutorAmount || 0;
+              acc.platform += payment.tuToriaAmount || 0;
+              return acc;
+            },
+            { total: 0, tutor: 0, platform: 0 }
+          );
+
+          const activeStudents = await paymentCollection.distinct(
+            "studentEmail",
+            { paidStatus: true }
+          );
+          const activeTutors = await paymentCollection.distinct("email", {
+            paidStatus: true,
+            source: { $in: ["myApplications", "contactTutor"] },
+          });
+
+          res.send({
+            totalUsers,
+            totalTutors,
+            totalRequests,
+            pendingRequests,
+            totalPayments,
+            revenueSummary,
+            recentPayments,
+            activeStudents: activeStudents.length,
+            activeTutors: activeTutors.length,
+          });
+        } catch (error) {
+          console.error("Error computing stats:", error);
+          res.status(500).send({ message: "Failed to compute stats" });
+        }
+      }
+    );
 
     //...............................................
 
