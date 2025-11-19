@@ -2,7 +2,7 @@ const express = require("express");
 require("dotenv").config();
 const cors = require("cors");
 const axios = require("axios");
-  const crypto = require("crypto");
+const crypto = require("crypto");
 const nodemailer = require("nodemailer");
 const SSLCommerzPayment = require("sslcommerz-lts");
 const jwt = require("jsonwebtoken");
@@ -53,7 +53,6 @@ async function run() {
       .db("tuitionNetworkDB")
       .collection("dashboardNotices");
 
-
     // ------------------ Custom ID Generator ------------------
     async function generateCustomId(role, collection) {
       const prefix = role === "student" ? "SID" : "TID";
@@ -94,7 +93,10 @@ async function run() {
         }
       }
 
-      return Array.from({ length: count }, (_, idx) => `${lastNumber + idx + 1}`);
+      return Array.from(
+        { length: count },
+        (_, idx) => `${lastNumber + idx + 1}`
+      );
     }
 
     async function generateTuitionId(collection) {
@@ -158,10 +160,7 @@ async function run() {
       }
 
       if (typeof subjects === "string") {
-        return subjects
-          .split(",")
-          .map(sanitizeString)
-          .filter(Boolean);
+        return subjects.split(",").map(sanitizeString).filter(Boolean);
       }
 
       return [];
@@ -179,20 +178,26 @@ async function run() {
       const errors = [];
       const sanitized = { ...payload };
 
-      sanitized.studentEmail = normalizeEmail(payload.studentEmail || payload.email);
+      sanitized.studentEmail = normalizeEmail(
+        payload.studentEmail || payload.email
+      );
       if (!sanitized.studentEmail) {
         errors.push("studentEmail is required and must be valid");
       }
 
-      sanitized.studentName = sanitizeString(payload.studentName || payload.name);
+      sanitized.studentName = sanitizeString(
+        payload.studentName || payload.name
+      );
       if (!sanitized.studentName) {
         errors.push("studentName is required");
       }
 
-      sanitized.phone =
-        sanitizeString(
-          payload.phone || payload.contactNumber || payload.guardianPhone || payload.mobile
-        );
+      sanitized.phone = sanitizeString(
+        payload.phone ||
+          payload.contactNumber ||
+          payload.guardianPhone ||
+          payload.mobile
+      );
       if (!sanitized.phone) {
         errors.push("phone is required");
       }
@@ -207,7 +212,9 @@ async function run() {
         errors.push("location is required");
       }
 
-      sanitized.classCourse = sanitizeString(payload.classCourse || payload.classLevel);
+      sanitized.classCourse = sanitizeString(
+        payload.classCourse || payload.classLevel
+      );
       if (!sanitized.classCourse) {
         errors.push("classCourse is required");
       }
@@ -307,7 +314,7 @@ async function run() {
       res.send(users);
     });
 
-    app.put("/users/:email",verifyToken, async (req, res) => {
+    app.put("/users/:email", verifyToken, async (req, res) => {
       const email = req.params.email;
       const updatedData = req.body;
 
@@ -360,8 +367,6 @@ async function run() {
       }
     });
 
-
-
     app.post("/users", async (req, res) => {
       const user = req.body;
 
@@ -377,7 +382,7 @@ async function run() {
       const newUser = {
         ...user,
         customId,
-         
+
         createdAt: new Date(),
       };
 
@@ -400,8 +405,7 @@ async function run() {
       const newTutor = {
         ...tutor,
         customId,
-  
-    
+
         createdAt: new Date(),
       };
 
@@ -409,91 +413,90 @@ async function run() {
       res.send({ ...result, customId });
     });
 
-
     //.....................//
-  
-app.post("/send-verification", async (req, res) => {
-  const { email } = req.body;
 
-  if (!email) {
-    return res.status(400).send({ message: "Email is required" });
-  }
+    app.post("/send-verification", async (req, res) => {
+      const { email } = req.body;
 
-  try {
-    // Generate 6-digit code
-    const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiry = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
+      if (!email) {
+        return res.status(400).send({ message: "Email is required" });
+      }
 
-    // Save or update verification code for this email
-    await tempVerificationCollection.updateOne(
-      { email },
-      { $set: { verificationCode, verificationExpires: expiry } },
-      { upsert: true }
-    );
+      try {
+        // Generate 6-digit code
+        const verificationCode = Math.floor(
+          100000 + Math.random() * 900000
+        ).toString();
+        const expiry = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
 
-    // Setup mail transporter
-    const transporter = nodemailer.createTransport({
-      service: "gmail",
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS,
-      },
-    });
+        // Save or update verification code for this email
+        await tempVerificationCollection.updateOne(
+          { email },
+          { $set: { verificationCode, verificationExpires: expiry } },
+          { upsert: true }
+        );
 
-    const mailOptions = {
-      from: `"TuToria" <${process.env.EMAIL_USER}>`,
-      to: email,
-      subject: "Your TuToria Email Verification Code",
-      html: `
+        // Setup mail transporter
+        const transporter = nodemailer.createTransport({
+          service: "gmail",
+          auth: {
+            user: process.env.EMAIL_USER,
+            pass: process.env.EMAIL_PASS,
+          },
+        });
+
+        const mailOptions = {
+          from: `"TuToria" <${process.env.EMAIL_USER}>`,
+          to: email,
+          subject: "Your TuToria Email Verification Code",
+          html: `
         <div style="font-family:Arial;padding:20px;background:#f7f9fc;">
           <h2>Here’s your TuToria verification code</h2>
           <h1 style="color:#2563eb;font-size:32px;">${verificationCode}</h1>
           <p>This code will expire in <b>5 minutes</b>.</p>
         </div>
       `,
-    };
+        };
 
-    await transporter.sendMail(mailOptions);
+        await transporter.sendMail(mailOptions);
 
-    res.send({ message: "Verification code sent successfully!" });
-  } catch (error) {
-    console.error("Error sending verification:", error);
-    res.status(500).send({ message: "Failed to send verification code" });
-  }
-});
+        res.send({ message: "Verification code sent successfully!" });
+      } catch (error) {
+        console.error("Error sending verification:", error);
+        res.status(500).send({ message: "Failed to send verification code" });
+      }
+    });
 
+    app.post("/verify-code", async (req, res) => {
+      const { email, code } = req.body;
 
+      try {
+        const record = await tempVerificationCollection.findOne({ email });
+        if (!record)
+          return res
+            .status(404)
+            .send({ message: "No verification request found" });
 
+        const now = new Date();
+        if (now > new Date(record.verificationExpires)) {
+          return res.status(400).send({ message: "Verification code expired" });
+        }
 
-   app.post("/verify-code", async (req, res) => {
-  const { email, code } = req.body;
+        if (record.verificationCode !== code) {
+          return res.status(400).send({ message: "Invalid verification code" });
+        }
 
-  try {
-    const record = await tempVerificationCollection.findOne({ email });
-    if (!record) return res.status(404).send({ message: "No verification request found" });
+        // Code correct — verification complete
+        await tempVerificationCollection.deleteOne({ email });
 
-    const now = new Date();
-    if (now > new Date(record.verificationExpires)) {
-      return res.status(400).send({ message: "Verification code expired" });
-    }
+        res.send({ message: "Email verified successfully!" });
+      } catch (error) {
+        console.error("Error verifying code:", error);
+        res.status(500).send({ message: "Server error during verification" });
+      }
+    });
 
-    if (record.verificationCode !== code) {
-      return res.status(400).send({ message: "Invalid verification code" });
-    }
-
-    // Code correct — verification complete
-    await tempVerificationCollection.deleteOne({ email });
-
-    res.send({ message: "Email verified successfully!" });
-  } catch (error) {
-    console.error("Error verifying code:", error);
-    res.status(500).send({ message: "Server error during verification" });
-  }
-});
-
-
-
-//...............//
+    //...............//
 
     app.put("/tutors/:email", verifyToken, async (req, res) => {
       const email = req.params.email;
@@ -580,7 +583,9 @@ app.post("/send-verification", async (req, res) => {
           if (payload.length === 0) {
             return res
               .status(400)
-              .send({ message: "Payload array must contain at least one request" });
+              .send({
+                message: "Payload array must contain at least one request",
+              });
           }
 
           const validationResults = payload.map((item, index) => ({
@@ -595,7 +600,10 @@ app.post("/send-verification", async (req, res) => {
           if (validItems.length === 0) {
             return res.status(422).send({
               message: "All tutor requests failed validation",
-              errors: validationResults.map(({ index, errors }) => ({ index, errors })),
+              errors: validationResults.map(({ index, errors }) => ({
+                index,
+                errors,
+              })),
             });
           }
 
@@ -610,7 +618,9 @@ app.post("/send-verification", async (req, res) => {
             createdAt: new Date(),
           }));
 
-          const insertResult = await tutorRequestCollection.insertMany(docsToInsert);
+          const insertResult = await tutorRequestCollection.insertMany(
+            docsToInsert
+          );
 
           const rejected = validationResults
             .filter((entry) => !entry.isValid)
@@ -628,7 +638,8 @@ app.post("/send-verification", async (req, res) => {
           });
         }
 
-        const { isValid, errors, sanitized } = validateTutorRequestPayload(payload);
+        const { isValid, errors, sanitized } =
+          validateTutorRequestPayload(payload);
 
         if (!isValid) {
           return res.status(422).send({
@@ -1498,8 +1509,12 @@ ${studentName}
 
     app.post("/notices", verifyToken, verifyAdmin, async (req, res) => {
       try {
-        const { title, message, audience = "all", priority = "normal" } =
-          req.body || {};
+        const {
+          title,
+          message,
+          audience = "all",
+          priority = "normal",
+        } = req.body || {};
 
         if (!title || !message) {
           return res
@@ -1579,14 +1594,24 @@ ${studentName}
             { total: 0, tutor: 0, platform: 0 }
           );
 
-          const activeStudents = await paymentCollection.distinct(
-            "studentEmail",
-            { paidStatus: true }
-          );
-          const activeTutors = await paymentCollection.distinct("email", {
-            paidStatus: true,
-            source: { $in: ["myApplications", "contactTutor"] },
-          });
+          const activeStudents = await paymentCollection
+            .aggregate([
+              { $match: { paidStatus: true } },
+              { $group: { _id: "$studentEmail" } },
+            ])
+            .toArray();
+
+          const activeTutors = await paymentCollection
+            .aggregate([
+              {
+                $match: {
+                  paidStatus: true,
+                  source: { $in: ["myApplications", "contactTutor"] },
+                },
+              },
+              { $group: { _id: "$email" } },
+            ])
+            .toArray();
 
           res.send({
             totalUsers,
