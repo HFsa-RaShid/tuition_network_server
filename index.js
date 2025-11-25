@@ -65,7 +65,7 @@ async function run() {
 
       let newNumber = 1;
       if (lastUser.length > 0 && lastUser[0].customId) {
-        const lastId = lastUser[0].customId; // যেমন SID-5
+        const lastId = lastUser[0].customId; //  SID-5
         const lastNumber = parseInt(lastId.split("-")[1]);
         newNumber = lastNumber + 1;
       }
@@ -400,6 +400,8 @@ async function run() {
       if (existingTutor) {
         return res.send({ message: "Tutor already exists", insertedId: null });
       }
+      // Assign role so generator can find previous tutor
+  tutor.role = "tutor";
 
       // Custom ID generate
       const customId = await generateCustomId("tutor", tutorCollection);
@@ -417,58 +419,6 @@ async function run() {
 
     //.....................//
 
-    // app.post("/send-verification", async (req, res) => {
-    //   const { email } = req.body;
-
-    //   if (!email) {
-    //     return res.status(400).send({ message: "Email is required" });
-    //   }
-
-    //   try {
-    //     // Generate 6-digit code
-    //     const verificationCode = Math.floor(
-    //       100000 + Math.random() * 900000
-    //     ).toString();
-    //     const expiry = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
-
-    //     // Save or update verification code for this email
-    //     await tempVerificationCollection.updateOne(
-    //       { email },
-    //       { $set: { verificationCode, verificationExpires: expiry } },
-    //       { upsert: true }
-    //     );
-
-    //     // Setup mail transporter
-    //     const transporter = nodemailer.createTransport({
-    //       service: "gmail",
-    //       auth: {
-    //         user: process.env.EMAIL_USER,
-    //         pass: process.env.EMAIL_PASS,
-    //       },
-    //     });
-
-    //     const mailOptions = {
-    //       from: `"TuToria" <${process.env.EMAIL_USER}>`,
-    //       to: email,
-    //       subject: "Your TuToria Email Verification Code",
-    //       html: `
-    //     <div style="font-family:Arial;padding:20px;background:#f7f9fc;">
-    //       <h2>Here’s your TuToria verification code</h2>
-    //       <h1 style="color:#2563eb;font-size:32px;">${verificationCode}</h1>
-    //       <p>This code will expire in <b>5 minutes</b>.</p>
-    //     </div>
-    //   `,
-    //     };
-
-    //     await transporter.sendMail(mailOptions);
-
-    //     res.send({ message: "Verification code sent successfully!" });
-    //   } catch (error) {
-    //     console.error("Error sending verification:", error);
-    //     res.status(500).send({ message: "Failed to send verification code" });
-    //   }
-    // });
-    //..............
 
     app.post("/send-verification", async (req, res) => {
   const { email, phone } = req.body;
