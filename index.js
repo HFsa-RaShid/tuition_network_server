@@ -39,6 +39,9 @@ async function run() {
     const tutorRequestCollection = client
       .db("tuitionNetworkDB")
       .collection("tutorRequests");
+    const tutorRequestDemoCollection = client
+      .db("tuitionNetworkDB")
+      .collection("tutorRequestsDemo");
     const paymentCollection = client
       .db("tuitionNetworkDB")
       .collection("payments");
@@ -297,17 +300,6 @@ async function run() {
       next();
     };
 
-    // const verifyStudent = async (req, res, next) => {
-    //   const email = req.decoded.email;
-    //   const query = { email: email };
-    //   const user = await userCollection.findOne(query);
-    //   const isStudent = user?.role === "student";
-    //   if (!isStudent) {
-    //     return res.status(403).send({ message: "forbidden access" });
-    //   }
-    //   next();
-    // };
-
     app.get("/users", async (req, res) => {
       //verifyToken,admin
       const users = await userCollection.find().toArray();
@@ -400,8 +392,8 @@ async function run() {
       if (existingTutor) {
         return res.send({ message: "Tutor already exists", insertedId: null });
       }
-      // Assign role so generator can find previous tutor
-  tutor.role = "tutor";
+
+      tutor.role = "tutor";
 
       // Custom ID generate
       const customId = await generateCustomId("tutor", tutorCollection);
@@ -419,71 +411,72 @@ async function run() {
 
     //.....................//
 
-
     app.post("/send-verification", async (req, res) => {
-  const { email, phone } = req.body;
+      const { email, phone } = req.body;
 
-  if (!email || !phone) {
-    return res.status(400).send({ message: "Email & Phone are required" });
-  }
-
-  try {
-    // Check if email or phone already exists in main users collection
-    const existingUser = await userCollection.findOne({
-      $or: [{ email }, { phone }],
-    });
-
-    if (existingUser) {
-      if (existingUser.email === email) {
-        return res.status(400).send({ message: "Email already used" });
+      if (!email || !phone) {
+        return res.status(400).send({ message: "Email & Phone are required" });
       }
-      if (existingUser.phone === phone) {
-        return res.status(400).send({ message: "Phone number already used" });
-      }
-    }
 
-    // Generate 6-digit code
-    const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiry = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
+      try {
+        // Check if email or phone already exists in main users collection
+        const existingUser = await userCollection.findOne({
+          $or: [{ email }, { phone }],
+        });
 
-    // Save or update verification code
-    await tempVerificationCollection.updateOne(
-      { email },
-      { $set: { verificationCode, verificationExpires: expiry } },
-      { upsert: true }
-    );
+        if (existingUser) {
+          if (existingUser.email === email) {
+            return res.status(400).send({ message: "Email already used" });
+          }
+          if (existingUser.phone === phone) {
+            return res
+              .status(400)
+              .send({ message: "Phone number already used" });
+          }
+        }
 
-    // Send Email
-    const transporter = nodemailer.createTransport({
-      service: "gmail",
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS,
-      },
-    });
+        // Generate 6-digit code
+        const verificationCode = Math.floor(
+          100000 + Math.random() * 900000
+        ).toString();
+        const expiry = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
 
-    const mailOptions = {
-      from: `"TuToria" <${process.env.EMAIL_USER}>`,
-      to: email,
-      subject: "Your TuToria Email Verification Code",
-      html: `
+        // Save or update verification code
+        await tempVerificationCollection.updateOne(
+          { email },
+          { $set: { verificationCode, verificationExpires: expiry } },
+          { upsert: true }
+        );
+
+        // Send Email
+        const transporter = nodemailer.createTransport({
+          service: "gmail",
+          auth: {
+            user: process.env.EMAIL_USER,
+            pass: process.env.EMAIL_PASS,
+          },
+        });
+
+        const mailOptions = {
+          from: `"TuToria" <${process.env.EMAIL_USER}>`,
+          to: email,
+          subject: "Your TuToria Email Verification Code",
+          html: `
         <div style="font-family:Arial;padding:20px;background:#f7f9fc;">
           <h2>Your Verification Code</h2>
           <h1 style="color:#2563eb;font-size:32px;">${verificationCode}</h1>
         </div>
       `,
-    };
+        };
 
-    await transporter.sendMail(mailOptions);
+        await transporter.sendMail(mailOptions);
 
-    res.send({ message: "Verification code sent successfully!" });
-  } catch (error) {
-    console.error(error);
-    res.status(500).send({ message: "Failed to send verification code" });
-  }
-});
-
-
+        res.send({ message: "Verification code sent successfully!" });
+      } catch (error) {
+        console.error(error);
+        res.status(500).send({ message: "Failed to send verification code" });
+      }
+    });
 
     //..............................
 
@@ -518,18 +511,16 @@ async function run() {
     //....................//
 
     app.get("/find-email-by-phone/:phone", async (req, res) => {
-  const phone = req.params.phone;
+      const phone = req.params.phone;
 
-  const user = await userCollection.findOne({ phone });
+      const user = await userCollection.findOne({ phone });
 
-  if (!user) {
-    return res.status(404).send({ message: "Phone number not found" });
-  }
+      if (!user) {
+        return res.status(404).send({ message: "Phone number not found" });
+      }
 
-  res.send({ email: user.email });
-});
-
-
+      res.send({ email: user.email });
+    });
 
     //...............//
 
@@ -1665,6 +1656,182 @@ ${studentName}
     );
 
     //...............................................
+    // POST Demo Request
+
+    app.post("/tutorRequests/demo", verifyToken, async (req, res) => {
+      const {
+        createdAt,
+        studentId,
+        studentName,
+        studentEmail,
+        studentPhone,
+        tutorId,
+        tutorName,
+        tutorEmail,
+        tutorPhone,
+      } = req.body;
+
+      //Required fields validation
+      if (
+        !studentId ||
+        !studentName ||
+        !studentEmail ||
+        !tutorId ||
+        !tutorName
+      ) {
+        return res.status(422).json({ message: "Missing required fields" });
+      }
+
+      const newRequest = {
+        createdAt: createdAt || new Date().toISOString(),
+        studentId,
+        studentName,
+        studentEmail,
+        studentPhone: studentPhone || "",
+        tutorId,
+        tutorName,
+        tutorEmail: tutorEmail || "",
+        tutorPhone: tutorPhone || "",
+        status: "pending",
+      };
+
+      try {
+        const result = await tutorRequestDemoCollection.insertOne(newRequest);
+        res.status(201).json({
+          message: "Tutor request sent successfully",
+          requestId: result.insertedId,
+        });
+      } catch (err) {
+        console.error("Error inserting tutor request:", err);
+        res.status(500).json({ message: "Server error" });
+      }
+    });
+
+    //.......................................//
+    // Get all demo tutor requests
+    app.get("/tutorRequests/demo", async (req, res) => {
+      //verifyToken
+      try {
+        const requests = await tutorRequestDemoCollection
+          .find({})
+          .sort({ createdAt: -1 })
+          .toArray();
+
+        res.status(200).json({
+          message: "Demo requests fetched successfully",
+          requests,
+        });
+      } catch (err) {
+        console.error("Error fetching demo requests:", err);
+        res.status(500).json({ message: "Server error" });
+      }
+    });
+    //...........................//
+// ------------------ SEND LINK ROUTE ------------------
+app.post("/tutorRequests/send-link", async (req, res) => {
+  try {
+    const { requestId, link, datetime } = req.body;
+    if (!requestId || !link || !datetime)
+      return res.status(422).json({ message: "Missing required fields" });
+
+    const request = await tutorRequestDemoCollection.findOne({ _id: new ObjectId(requestId) });
+    if (!request) return res.status(404).json({ message: "Request not found" });
+
+    // Update DB first
+    await tutorRequestDemoCollection.updateOne(
+      { _id: new ObjectId(requestId) },
+      { $set: { meetingLink: link, meetingDatetime: datetime, status: "linkSent" } }
+    );
+
+    const transporter = nodemailer.createTransport({
+      service: "gmail",
+      auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS,
+      },
+    });
+
+    // Email to student
+    await transporter.sendMail({
+      from: `"TuToria" <${process.env.EMAIL_USER}>`,
+      to: request.studentEmail,
+      subject: "Meeting Link Sent - TuToria",
+      html: `
+        <p>Hi ${request.studentName},</p>
+        <p>Your tutor <strong>${request.tutorName}</strong> has sent a meeting link:</p>
+        <p><a href="${link}" target="_blank">${link}</a></p>
+        <p>Scheduled at: ${datetime}</p>
+        <p>Best regards,<br/>TuToria Team</p>
+      `,
+    });
+
+    // Email to tutor
+    if (request.tutorEmail) {
+      await transporter.sendMail({
+        from: `"TuToria" <${process.env.EMAIL_USER}>`,
+        to: request.tutorEmail,
+        subject: "Meeting Link Sent - TuToria",
+        html: `
+          <p>Hi ${request.tutorName},</p>
+          <p>You have sent a meeting link to <strong>${request.studentName}</strong>:</p>
+          <p><a href="${link}" target="_blank">${link}</a></p>
+          <p>Scheduled at: ${datetime}</p>
+          <p>Best regards,<br/>TuToria Team</p>
+        `,
+      });
+    }
+
+    res.json({ success: true, message: "Link sent to student and tutor" });
+  } catch (error) {
+    console.error("Error sending link:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+
+app.delete("/tutorRequestsDemo/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { notifyMessage } = req.body;
+
+    const request = await tutorRequestDemoCollection.findOne({ _id: new ObjectId(id) });
+    if (!request) return res.status(404).json({ message: "Request not found" });
+
+    // Setup transporter
+    const transporter = nodemailer.createTransport({
+      service: "gmail",
+      auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS,
+      },
+    });
+
+    // Email to Student
+    if (notifyMessage) {
+      await transporter.sendMail({
+        from: `"TuToria" <${process.env.EMAIL_USER}>`,
+        to: request.studentEmail,
+        subject: "TuToria Request Removed",
+        html: `
+          <p>Hi ${request.studentName},</p>
+          <p>Unfortunately, your tutor <strong>${request.tutorName}</strong> is unable to proceed with this session request.</p>
+          <p>Message: ${notifyMessage}</p>
+          <p>Best regards,<br/>TuToria Team</p>
+        `,
+      });
+    }
+
+    // Delete from DB
+    await tutorRequestDemoCollection.deleteOne({ _id: new ObjectId(id) });
+
+    res.json({ success: true, message: "Request deleted and student notified" });
+  } catch (err) {
+    console.error("Error deleting request:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+
 
     //.......................................//
     // Send a ping to confirm a successful connection
