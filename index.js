@@ -56,6 +56,10 @@ async function run() {
       .db("tuitionNetworkDB")
       .collection("dashboardNotices");
 
+    const ReviewsCollection = client
+      .db("tuitionNetworkDB")
+      .collection("reviews");
+
     // ------------------ Custom ID Generator ------------------
     async function generateCustomId(role, collection) {
       const prefix = role === "student" ? "SID" : "TID";
@@ -1727,111 +1731,192 @@ ${studentName}
       }
     });
     //...........................//
-// ------------------ SEND LINK ROUTE ------------------
-app.post("/tutorRequests/send-link", async (req, res) => {
-  try {
-    const { requestId, link, datetime } = req.body;
-    if (!requestId || !link || !datetime)
-      return res.status(422).json({ message: "Missing required fields" });
+    // ------------------ SEND LINK ROUTE ------------------
+    app.post("/tutorRequests/send-link", async (req, res) => {
+      try {
+        const { requestId, link, datetime } = req.body;
+        if (!requestId || !link || !datetime)
+          return res.status(422).json({ message: "Missing required fields" });
 
-    const request = await tutorRequestDemoCollection.findOne({ _id: new ObjectId(requestId) });
-    if (!request) return res.status(404).json({ message: "Request not found" });
+        const request = await tutorRequestDemoCollection.findOne({
+          _id: new ObjectId(requestId),
+        });
+        if (!request)
+          return res.status(404).json({ message: "Request not found" });
 
-    // Update DB first
-    await tutorRequestDemoCollection.updateOne(
-      { _id: new ObjectId(requestId) },
-      { $set: { meetingLink: link, meetingDatetime: datetime, status: "linkSent" } }
-    );
+        // Update DB first
+        await tutorRequestDemoCollection.updateOne(
+          { _id: new ObjectId(requestId) },
+          {
+            $set: {
+              meetingLink: link,
+              meetingDatetime: datetime,
+              status: "linkSent",
+            },
+          }
+        );
 
-    const transporter = nodemailer.createTransport({
-      service: "gmail",
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS,
-      },
-    });
+        const transporter = nodemailer.createTransport({
+          service: "gmail",
+          auth: {
+            user: process.env.EMAIL_USER,
+            pass: process.env.EMAIL_PASS,
+          },
+        });
 
-    // Email to student
-    await transporter.sendMail({
-      from: `"TuToria" <${process.env.EMAIL_USER}>`,
-      to: request.studentEmail,
-      subject: "Meeting Link Sent - TuToria",
-      html: `
+        // Email to student
+        await transporter.sendMail({
+          from: `"TuToria" <${process.env.EMAIL_USER}>`,
+          to: request.studentEmail,
+          subject: "Meeting Link Sent - TuToria",
+          html: `
         <p>Hi ${request.studentName},</p>
         <p>Your tutor <strong>${request.tutorName}</strong> has sent a meeting link:</p>
         <p><a href="${link}" target="_blank">${link}</a></p>
         <p>Scheduled at: ${datetime}</p>
         <p>Best regards,<br/>TuToria Team</p>
       `,
-    });
+        });
 
-    // Email to tutor
-    if (request.tutorEmail) {
-      await transporter.sendMail({
-        from: `"TuToria" <${process.env.EMAIL_USER}>`,
-        to: request.tutorEmail,
-        subject: "Meeting Link Sent - TuToria",
-        html: `
+        // Email to tutor
+        if (request.tutorEmail) {
+          await transporter.sendMail({
+            from: `"TuToria" <${process.env.EMAIL_USER}>`,
+            to: request.tutorEmail,
+            subject: "Meeting Link Sent - TuToria",
+            html: `
           <p>Hi ${request.tutorName},</p>
           <p>You have sent a meeting link to <strong>${request.studentName}</strong>:</p>
           <p><a href="${link}" target="_blank">${link}</a></p>
           <p>Scheduled at: ${datetime}</p>
           <p>Best regards,<br/>TuToria Team</p>
         `,
-      });
-    }
+          });
+        }
 
-    res.json({ success: true, message: "Link sent to student and tutor" });
-  } catch (error) {
-    console.error("Error sending link:", error);
-    res.status(500).json({ message: "Internal server error" });
-  }
-});
-
-
-app.delete("/tutorRequestsDemo/:id", async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { notifyMessage } = req.body;
-
-    const request = await tutorRequestDemoCollection.findOne({ _id: new ObjectId(id) });
-    if (!request) return res.status(404).json({ message: "Request not found" });
-
-    // Setup transporter
-    const transporter = nodemailer.createTransport({
-      service: "gmail",
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS,
-      },
+        res.json({ success: true, message: "Link sent to student and tutor" });
+      } catch (error) {
+        console.error("Error sending link:", error);
+        res.status(500).json({ message: "Internal server error" });
+      }
     });
 
-    // Email to Student
-    if (notifyMessage) {
-      await transporter.sendMail({
-        from: `"TuToria" <${process.env.EMAIL_USER}>`,
-        to: request.studentEmail,
-        subject: "TuToria Request Removed",
-        html: `
+    app.delete("/tutorRequestsDemo/:id", async (req, res) => {
+      try {
+        const { id } = req.params;
+        const { notifyMessage } = req.body;
+
+        const request = await tutorRequestDemoCollection.findOne({
+          _id: new ObjectId(id),
+        });
+        if (!request)
+          return res.status(404).json({ message: "Request not found" });
+
+        // Setup transporter
+        const transporter = nodemailer.createTransport({
+          service: "gmail",
+          auth: {
+            user: process.env.EMAIL_USER,
+            pass: process.env.EMAIL_PASS,
+          },
+        });
+
+        // Email to Student
+        if (notifyMessage) {
+          await transporter.sendMail({
+            from: `"TuToria" <${process.env.EMAIL_USER}>`,
+            to: request.studentEmail,
+            subject: "TuToria Request Removed",
+            html: `
           <p>Hi ${request.studentName},</p>
           <p>Unfortunately, your tutor <strong>${request.tutorName}</strong> is unable to proceed with this session request.</p>
           <p>Message: ${notifyMessage}</p>
           <p>Best regards,<br/>TuToria Team</p>
         `,
-      });
-    }
+          });
+        }
 
-    // Delete from DB
-    await tutorRequestDemoCollection.deleteOne({ _id: new ObjectId(id) });
+        // Delete from DB
+        await tutorRequestDemoCollection.deleteOne({ _id: new ObjectId(id) });
 
-    res.json({ success: true, message: "Request deleted and student notified" });
-  } catch (err) {
-    console.error("Error deleting request:", err);
-    res.status(500).json({ message: "Server error" });
-  }
-});
+        res.json({
+          success: true,
+          message: "Request deleted and student notified",
+        });
+      } catch (err) {
+        console.error("Error deleting request:", err);
+        res.status(500).json({ message: "Server error" });
+      }
+    });
 
+    // ------------------ POST REVIEW ------------------
+    app.post("/reviews", async (req, res) => {
+      try {
+        const { name, email, role, rating, review, image } = req.body;
 
+        if (!name || !email || !rating || !review) {
+          return res.status(422).json({ message: "Missing fields" });
+        }
+
+        const reviewData = {
+          name,
+          email,
+          role,
+          rating,
+          review,
+          image,
+          createdAt: new Date(),
+        };
+
+        const result = await ReviewsCollection.insertOne(reviewData);
+
+        res.send({
+          success: true,
+          message: "Review added successfully",
+          data: result,
+        });
+      } catch (err) {
+        console.error("Review POST error:", err);
+        res.status(500).json({ message: "Server error" });
+      }
+    });
+
+    // ------------------ GET ALL REVIEWS ------------------
+    app.get("/reviews", async (req, res) => {
+      try {
+        const reviews = await ReviewsCollection.find()
+          .sort({ createdAt: -1 })
+          .toArray();
+        res.send({
+          success: true,
+          reviews,
+        });
+      } catch (err) {
+        console.error("Review GET error:", err);
+        res.status(500).json({ message: "Server error" });
+      }
+    });
+    // DELETE REVIEW (Admin only)
+    app.delete("/reviews/:id", verifyToken, async (req, res) => {
+      try {
+        const reviewId = req.params.id;
+
+        if (!ObjectId.isValid(reviewId))
+          return res.status(400).json({ message: "Invalid review ID" });
+
+        const result = await ReviewsCollection.deleteOne({
+          _id: new ObjectId(reviewId),
+        });
+
+        if (result.deletedCount === 0)
+          return res.status(404).json({ message: "Review not found" });
+
+        res.json({ success: true, message: "Review deleted successfully" });
+      } catch (err) {
+        console.error(err);
+        res.status(500).json({ message: "Server error" });
+      }
+    });
 
     //.......................................//
     // Send a ping to confirm a successful connection
