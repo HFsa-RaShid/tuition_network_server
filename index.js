@@ -46,9 +46,7 @@ async function run() {
       .db("tuitionNetworkDB")
       .collection("payments");
     const tutorCollection = client.db("tuitionNetworkDB").collection("tutors");
-    const VerificationCollection = client
-      .db("tuitionNetworkDB")
-      .collection("VerificationRequest");
+
     const tempVerificationCollection = client
       .db("tuitionNetworkDB")
       .collection("tempVerifications");
@@ -80,35 +78,16 @@ async function run() {
       return `${prefix}-${newNumber}`;
     }
 
-    // ------------------ Custom Tuition ID Generator ------------------
-    async function generateTuitionIds(collection, count = 1) {
-      if (count < 1) {
-        return [];
-      }
-
-      const lastRequest = await collection
-        .find({})
-        .sort({ createdAt: -1 })
-        .limit(1)
-        .toArray();
-
-      let lastNumber = 0;
-      if (lastRequest.length > 0 && lastRequest[0].tuitionId) {
-        const parsed = parseInt(lastRequest[0].tuitionId, 10);
-        if (!Number.isNaN(parsed)) {
-          lastNumber = parsed;
-        }
-      }
-
-      return Array.from(
-        { length: count },
-        (_, idx) => `${lastNumber + idx + 1}`
-      );
-    }
-
+    // ------------------ Tuition ID Generator ------------------
     async function generateTuitionId(collection) {
-      const [nextId] = await generateTuitionIds(collection, 1);
-      return nextId;
+      const lastRequest = await collection
+        .findOne({}, { sort: { createdAt: -1 } });
+      
+      const lastNumber = lastRequest?.tuitionId 
+        ? parseInt(lastRequest.tuitionId, 10) || 0 
+        : 0;
+      
+      return `${lastNumber + 1}`;
     }
 
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -275,8 +254,6 @@ async function run() {
       res.send({ token });
     });
 
-    // Users related API
-
     const verifyToken = (req, res, next) => {
       // console.log('inside verifyToken', req.headers.authorization);
       // next();
@@ -304,8 +281,7 @@ async function run() {
       next();
     };
 
-    app.get("/users", async (req, res) => {
-      //verifyToken,admin
+    app.get("/users", verifyToken, verifyAdmin, async (req, res) => {
       const users = await userCollection.find().toArray();
       res.send(users);
     });
@@ -351,7 +327,7 @@ async function run() {
                 { email },
                 { $set: { profileStatus: "Free" } }
               );
-              user.profileStatus = "Free"; // update local object so frontend sees it immediately
+              user.profileStatus = "Free";
             }
           }
         }
@@ -503,7 +479,6 @@ async function run() {
           return res.status(400).send({ message: "Invalid verification code" });
         }
 
-        // Code correct — verification complete
         await tempVerificationCollection.deleteOne({ email });
 
         res.send({ message: "Email verified successfully!" });
@@ -555,16 +530,22 @@ async function run() {
       res.send(result);
     });
 
+    // get all tutors
+
     app.get("/tutors", async (req, res) => {
       const tutors = await tutorCollection.find().toArray();
       res.send(tutors);
     });
+
+    // get tutor by email
 
     app.get("/tutors/:email", async (req, res) => {
       const email = req.params.email;
       const tutor = await tutorCollection.findOne({ email: email });
       res.send(tutor);
     });
+
+    // get tutor profile by id
 
     app.get("/tutors/profile/:id", async (req, res) => {
       try {
@@ -605,7 +586,7 @@ async function run() {
 
     // Post tutor request (single or bulk)
 
-    app.post("/tutorRequests", verifyToken, async (req, res) => {
+    app.post("/tutorRequests", async (req, res) => {
       try {
         const payload = req.body;
 
@@ -635,9 +616,15 @@ async function run() {
             });
           }
 
-          const tuitionIds = await generateTuitionIds(
-            tutorRequestCollection,
-            validItems.length
+          // Generate tuition IDs for bulk insert
+          const lastRequest = await tutorRequestCollection
+            .findOne({}, { sort: { createdAt: -1 } });
+          const lastNumber = lastRequest?.tuitionId 
+            ? parseInt(lastRequest.tuitionId, 10) || 0 
+            : 0;
+          const tuitionIds = Array.from(
+            { length: validItems.length },
+            (_, idx) => `${lastNumber + idx + 1}`
           );
 
           const docsToInsert = validItems.map((item, idx) => ({
@@ -1039,14 +1026,13 @@ async function run() {
       }
     });
 
-    app.get("/paymentBkash", async (req, res) => {
-      //verifyToken,admin
+    // get all payments (admin)
+    app.get("/paymentBkash", verifyToken, verifyAdmin, async (req, res) => {
       const paymentBkash = await paymentCollection.find().toArray();
       res.send(paymentBkash);
     });
 
-    //payment related api
-
+    // Payment Integration with SSLCommerz
     app.post("/paymentBkash", async (req, res) => {
       const {
         jobId,
@@ -1117,6 +1103,7 @@ async function run() {
         });
       });
     });
+
     // SUCCESS Route (Dynamic redirect)
     app.post("/payment/success/:tranId", async (req, res) => {
       const payment = await paymentCollection.findOne({
@@ -1145,12 +1132,36 @@ async function run() {
           `http://localhost:5173/student/payment/success/${req.params.tranId}`
         );
       } else if (payment.source === "getPremium") {
+        // Set premium expiry date (30 days from now)
+        const premiumExpiry = new Date();
+        premiumExpiry.setDate(premiumExpiry.getDate() + 30);
+
+        // Update user with premium status and expiry date
+        await userCollection.updateOne(
+          { email: payment.email },
+          {
+            $set: {
+              profileStatus: "Premium",
+              premiumExpiry: premiumExpiry,
+            },
+          }
+        );
+
+        // Update tutor if role is tutor
+        if (payment.role === "tutor") {
+          await tutorCollection.updateOne(
+            { email: payment.email },
+            {
+              $set: {
+                profileStatus: "Premium",
+                premiumExpiry: premiumExpiry,
+              },
+            }
+          );
+        }
+
         res.redirect(
           `http://localhost:5173/${payment.role}/payment/success/${req.params.tranId}`
-        );
-      } else if (payment.source === "contactTutor") {
-        res.redirect(
-          `http://localhost:5173/payment/success/${req.params.tranId}`
         );
       }
     });
@@ -1175,12 +1186,9 @@ async function run() {
         res.redirect(`http://localhost:5173/student/hired-tutors`);
       } else if (payment.source === "getPremium") {
         res.redirect(`http://localhost:5173/${payment.role}/settings/premium`);
-      } else if (payment.source === "contactTutor") {
-        res.redirect(
-          `http://localhost:5173/tutors/tutor-profile/${payment.tutorId}`
-        );
       }
     });
+    // GET payment by transactionId
 
     app.get("/payment/success/:tranId", async (req, res) => {
       const tranId = req.params.tranId;
@@ -1207,14 +1215,14 @@ async function run() {
       try {
         const payments = await paymentCollection
           .find({ jobId, paidStatus: true })
-          .toArray(); // if using MongoDB native driver
+          .toArray();
         res.status(200).json(payments);
       } catch (err) {
         res.status(500).json({ error: "Failed to fetch payment data" });
       }
     });
 
-    ////paymentHistory-tutor
+    //paymentHistory-tutor
 
     app.get("/tutor/paidJobs/:email", async (req, res) => {
       const email = req.params.email;
@@ -1267,6 +1275,7 @@ async function run() {
       res.send(merged);
     });
 
+    // GET multiple payments by jobIds
     app.post("/payments/multiple", async (req, res) => {
       const { jobIds } = req.body;
       if (!Array.isArray(jobIds))
@@ -1285,156 +1294,8 @@ async function run() {
       }
     });
 
-    app.post("/verification", async (req, res) => {
-      try {
-        const {
-          name,
-          email,
-          phone,
-          customId,
-          idImage,
-          NidImage,
-          city,
-          location,
-          verificationStatus,
-          userRole,
-        } = req.body;
-
-        // Check if already submitted
-        const existing = await VerificationCollection.findOne({ email });
-        if (existing) {
-          return res.status(400).json({ message: "Request already submitted" });
-        }
-
-        // insert directly (no constructor)
-        const newRequest = {
-          name,
-          email,
-          phone,
-          customId,
-          idImage,
-          NidImage,
-          city,
-          location,
-          verificationStatus,
-          userRole,
-          createdAt: new Date(),
-        };
-
-        await VerificationCollection.insertOne(newRequest);
-
-        res.status(201).json({ message: "Verification request submitted" });
-      } catch (error) {
-        console.error("Error saving request:", error);
-        res.status(500).json({ message: "Server error" });
-      }
-    });
-
-    //.............................................//
-
-    app.get("/verification", async (req, res) => {
-      //verifyToken,admin
-      const verification = await VerificationCollection.find().toArray();
-      res.send(verification);
-    });
-
-    // Approve verification
-    app.put("/verification/approve/:id", async (req, res) => {
-      try {
-        const { id } = req.params;
-        const verification = await VerificationCollection.findOne({
-          _id: new ObjectId(id),
-        });
-        if (!verification)
-          return res.status(404).send({ message: "Verification not found" });
-
-        // update verification request
-        await VerificationCollection.updateOne(
-          { _id: new ObjectId(id) },
-          { $set: { verificationStatus: "approved" } }
-        );
-
-        // update users collection
-        await userCollection.updateOne(
-          { email: verification.email },
-          { $set: { verificationStatus: "approved" } }
-        );
-
-        // update tutors collection (if role tutor)
-        if (verification.userRole === "tutor") {
-          await tutorCollection.updateOne(
-            { email: verification.email },
-            { $set: { verificationStatus: "approved" } }
-          );
-        }
-
-        res.send({ success: true, message: "Verification approved" });
-      } catch (error) {
-        console.error(error);
-        res.status(500).send({ message: "Internal server error" });
-      }
-    });
-
-    // Reject verification
-    app.delete("/verification/reject/:id", async (req, res) => {
-      try {
-        const { id } = req.params;
-        const verification = await VerificationCollection.findOne({
-          _id: new ObjectId(id),
-        });
-        if (!verification)
-          return res.status(404).send({ message: "Verification not found" });
-
-        // delete verification request
-        await VerificationCollection.deleteOne({ _id: new ObjectId(id) });
-
-        // update users collection
-        await userCollection.updateOne(
-          { email: verification.email },
-          { $set: { verificationStatus: "rejected" } }
-        );
-
-        // update tutors collection (if role tutor)
-        if (verification.userRole === "tutor") {
-          await tutorCollection.updateOne(
-            { email: verification.email },
-            { $set: { verificationStatus: "rejected" } }
-          );
-        }
-
-        // send rejection email
-        const transporter = nodemailer.createTransport({
-          service: "gmail",
-          auth: {
-            user: process.env.EMAIL_USER,
-            pass: process.env.EMAIL_PASS,
-          },
-        });
-
-        await transporter.sendMail({
-          from: `"TuToria" <${process.env.EMAIL_USER}>`,
-          to: verification.email,
-          subject: "Verification Rejected - Resubmit Required",
-          html: `
-        <p>Dear ${verification.name},</p>
-        <p>Your verification request has been <b>rejected</b>. Please ensure all details are correct and upload proper documents.</p>
-        <p>Then resubmit your verification request.</p>
-        <p>Thanks,<br/>TuToria Team</p>
-      `,
-        });
-
-        res.send({
-          success: true,
-          message: "Verification rejected and email sent",
-        });
-      } catch (error) {
-        console.error(error);
-        res.status(500).send({ message: "Internal server error" });
-      }
-    });
     //........................................................//
 
-    //...........
     // Nominatim geocode proxy
     app.get("/geocode", async (req, res) => {
       const { q } = req.query; // ?q=location_query
@@ -1461,65 +1322,7 @@ async function run() {
       }
     });
 
-    //............................Email
 
-    app.post("/contact", (req, res) => {
-      const {
-        tutorName,
-        studentName,
-        tutorEmail,
-        studentEmail,
-        studentPhone,
-        message,
-      } = req.body;
-
-      const transporter = nodemailer.createTransport({
-        service: "gmail",
-        auth: {
-          user: process.env.EMAIL_USER,
-          pass: process.env.EMAIL_PASS,
-        },
-      });
-
-      const mailOptions = {
-        from: studentEmail,
-        to: tutorEmail,
-        subject: `Tuition Request from ${studentName}`,
-        text: `
-Dear ${tutorName},
-
-I hope this message finds you well.
-
-My name is ${studentName}. I came across your profile and was impressed by your expertise. I am interested in receiving tuition from you and would like to discuss the possibility of learning under your guidance.
-
-Here are my details:
-
-Name: ${studentName}
-Email: ${studentEmail}
-Phone: ${studentPhone}
-
-Message:
-${message}
-
-I would greatly appreciate it if you could consider my request and respond at your convenience.
-
-Thank you very much for your time and consideration.
-
-Best regards,
-${studentName}
-`,
-      };
-
-      transporter.sendMail(mailOptions, (error, info) => {
-        if (error) {
-          console.error("Error sending email:", error);
-          res.status(500).send("Failed to send message.");
-        } else {
-          console.log("Email sent:", info.response);
-          res.status(200).send("Message sent successfully!");
-        }
-      });
-    });
 
     // Dashboard notices
     app.get("/notices", async (req, res) => {
@@ -1534,6 +1337,7 @@ ${studentName}
         res.status(500).send({ message: "Failed to fetch notices" });
       }
     });
+    // Post a new notice
 
     app.post("/notices", verifyToken, verifyAdmin, async (req, res) => {
       try {
@@ -1567,6 +1371,7 @@ ${studentName}
         res.status(500).send({ message: "Failed to post notice" });
       }
     });
+    // Delete a notice
 
     app.delete("/notices/:id", verifyToken, verifyAdmin, async (req, res) => {
       try {
@@ -1585,6 +1390,7 @@ ${studentName}
         res.status(500).send({ message: "Failed to delete notice" });
       }
     });
+    // Admin Stats Summary
 
     app.get(
       "/admin/stats-summary",
@@ -1713,8 +1519,7 @@ ${studentName}
 
     //.......................................//
     // Get all demo tutor requests
-    app.get("/tutorRequests/demo", async (req, res) => {
-      //verifyToken
+    app.get("/tutorRequests/demo",verifyToken, async (req, res) => {
       try {
         const requests = await tutorRequestDemoCollection
           .find({})
@@ -1730,7 +1535,7 @@ ${studentName}
         res.status(500).json({ message: "Server error" });
       }
     });
-    //...........................//
+
     // ------------------ SEND LINK ROUTE ------------------
     app.post("/tutorRequests/send-link", async (req, res) => {
       try {
@@ -1744,7 +1549,7 @@ ${studentName}
         if (!request)
           return res.status(404).json({ message: "Request not found" });
 
-        // Update DB first
+      
         await tutorRequestDemoCollection.updateOne(
           { _id: new ObjectId(requestId) },
           {
@@ -1800,6 +1605,7 @@ ${studentName}
         res.status(500).json({ message: "Internal server error" });
       }
     });
+    // ------------------ DELETE DEMO REQUEST ------------------
 
     app.delete("/tutorRequestsDemo/:id", async (req, res) => {
       try {
@@ -1836,7 +1642,7 @@ ${studentName}
           });
         }
 
-        // Delete from DB
+  
         await tutorRequestDemoCollection.deleteOne({ _id: new ObjectId(id) });
 
         res.json({
