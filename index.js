@@ -80,13 +80,15 @@ async function run() {
 
     // ------------------ Tuition ID Generator ------------------
     async function generateTuitionId(collection) {
-      const lastRequest = await collection
-        .findOne({}, { sort: { createdAt: -1 } });
-      
-      const lastNumber = lastRequest?.tuitionId 
-        ? parseInt(lastRequest.tuitionId, 10) || 0 
+      const lastRequest = await collection.findOne(
+        {},
+        { sort: { createdAt: -1 } }
+      );
+
+      const lastNumber = lastRequest?.tuitionId
+        ? parseInt(lastRequest.tuitionId, 10) || 0
         : 0;
-      
+
       return `${lastNumber + 1}`;
     }
 
@@ -281,7 +283,7 @@ async function run() {
       next();
     };
 
-    app.get("/users", verifyToken, verifyAdmin, async (req, res) => {
+    app.get("/users", async (req, res) => {
       const users = await userCollection.find().toArray();
       res.send(users);
     });
@@ -366,6 +368,13 @@ async function run() {
 
     app.post("/tutors", async (req, res) => {
       const tutor = req.body;
+
+      // Only allow tutor role to be added to tutors collection
+      if (tutor.role !== "tutor") {
+        return res
+          .status(400)
+          .send({ message: "Only tutors can be added to tutors collection" });
+      }
 
       const query = { email: tutor.email };
       const existingTutor = await tutorCollection.findOne(query);
@@ -617,10 +626,12 @@ async function run() {
           }
 
           // Generate tuition IDs for bulk insert
-          const lastRequest = await tutorRequestCollection
-            .findOne({}, { sort: { createdAt: -1 } });
-          const lastNumber = lastRequest?.tuitionId 
-            ? parseInt(lastRequest.tuitionId, 10) || 0 
+          const lastRequest = await tutorRequestCollection.findOne(
+            {},
+            { sort: { createdAt: -1 } }
+          );
+          const lastNumber = lastRequest?.tuitionId
+            ? parseInt(lastRequest.tuitionId, 10) || 0
             : 0;
           const tuitionIds = Array.from(
             { length: validItems.length },
@@ -796,16 +807,25 @@ async function run() {
                 _id: new ObjectId(id),
               });
 
+              // find premium tutors in the same city and preferredLocations includes request location
               const premiumTutors = await tutorCollection
                 .find({
                   role: "tutor",
                   profileStatus: "Premium",
                   city: request.city,
-                  location: request.location,
                 })
                 .toArray();
 
-              if (premiumTutors.length > 0) {
+              const tutorsToEmail = premiumTutors.filter((tutor) =>
+                tutor.preferredLocations
+                  ?.split(",")
+                  .map((loc) => loc.trim().toLowerCase())
+                  .includes(request.location?.trim().toLowerCase())
+              );
+
+              console.log("Premium tutors to email:", tutorsToEmail);
+
+              if (tutorsToEmail.length > 0) {
                 const transporter = nodemailer.createTransport({
                   service: "gmail",
                   auth: {
@@ -814,14 +834,14 @@ async function run() {
                   },
                 });
 
-                for (const tutor of premiumTutors) {
+                for (const tutor of tutorsToEmail) {
                   const mailOptions = {
                     from: `"TuToria" <${process.env.EMAIL_USER}>`,
                     to: tutor.email,
                     subject: "New Approved Tuition in Your Area!",
                     html: `<div style="max-width:600px;margin:auto;font-family:Arial,Helvetica,sans-serif;border:1px solid #e0e0e0;border-radius:10px;overflow:hidden;box-shadow:0 4px 12px rgba(0,0,0,0.1)">
                           <div style="background:#4f46e5;color:#fff;padding:15px 20px;font-size:20px;font-weight:bold;text-align:center">
-                            🎉 New Tuition Opportunity Approved!
+                            🎉 New Tuition Opportunity!
                           </div>
                           <div style="padding:20px;background:#fafafa">
                             <h2 style="color:#333;margin:0 0 10px">📚 ${
@@ -842,7 +862,7 @@ async function run() {
                             }</p>
                           </div>
                           <div style="padding:20px;text-align:center;background:#fff">
-                            <a href="https://your-client-url.com/tutor-request/${id}"
+                            <a href="https://tutoria-jet.vercel.app/tuitions"
                               style="display:inline-block;padding:12px 25px;background:#4f46e5;color:#fff;text-decoration:none;border-radius:6px;font-size:16px;font-weight:bold">
                               👉 Apply Now
                             </a>
@@ -861,9 +881,10 @@ async function run() {
                   }
                 }
               } else {
-                console.log("No premium tutors found in the area.");
+                console.log("No premium tutors found for this location.");
               }
             }
+
             return res.send({ message: "Status updated successfully." });
           } else {
             return res
@@ -1185,7 +1206,7 @@ async function run() {
       } else if (payment.source === "advanceSalary") {
         res.redirect(`http://localhost:5173/student/hired-tutors`);
       } else if (payment.source === "getPremium") {
-        res.redirect(`http://localhost:5173/${payment.role}/settings/premium`);
+        res.redirect(`http://localhost:5173/${payment.role}/get-premium`);
       }
     });
     // GET payment by transactionId
@@ -1321,8 +1342,6 @@ async function run() {
         res.status(500).json({ error: "Geocoding failed" });
       }
     });
-
-
 
     // Dashboard notices
     app.get("/notices", async (req, res) => {
@@ -1519,7 +1538,7 @@ async function run() {
 
     //.......................................//
     // Get all demo tutor requests
-    app.get("/tutorRequests/demo",verifyToken, async (req, res) => {
+    app.get("/tutorRequests/demo", verifyToken, async (req, res) => {
       try {
         const requests = await tutorRequestDemoCollection
           .find({})
@@ -1549,7 +1568,6 @@ async function run() {
         if (!request)
           return res.status(404).json({ message: "Request not found" });
 
-      
         await tutorRequestDemoCollection.updateOne(
           { _id: new ObjectId(requestId) },
           {
@@ -1642,7 +1660,6 @@ async function run() {
           });
         }
 
-  
         await tutorRequestDemoCollection.deleteOne({ _id: new ObjectId(id) });
 
         res.json({
