@@ -283,7 +283,7 @@ async function run() {
       next();
     };
 
-    app.get("/users", async (req, res) => {
+    app.get("/users",verifyToken,verifyAdmin, async (req, res) => {
       const users = await userCollection.find().toArray();
       res.send(users);
     });
@@ -1538,7 +1538,7 @@ async function run() {
 
     //.......................................//
     // Get all demo tutor requests
-    app.get("/tutorRequests/demo", verifyToken, async (req, res) => {
+    app.get("/tutorRequests/demo", verifyToken,verifyAdmin, async (req, res) => {
       try {
         const requests = await tutorRequestDemoCollection
           .find({})
@@ -1740,7 +1740,7 @@ async function run() {
         res.status(500).json({ message: "Server error" });
       }
     });
-    //........................................//
+    //..................Contact with TuToria.....................//
     app.post("/contact", async (req, res) => {
       try {
         const { name, email, message } = req.body;
@@ -1748,8 +1748,6 @@ async function run() {
         if (!name || !email || !message) {
           return res.status(400).json({ message: "All fields are required" });
         }
-
-        // setup email transporter
         const transporter = nodemailer.createTransport({
           service: "gmail",
           auth: {
@@ -1757,8 +1755,6 @@ async function run() {
             pass: process.env.EMAIL_PASS,
           },
         });
-
-        // Email format you will receive
         await transporter.sendMail({
           from: `"TuToria Contact Form" <${process.env.EMAIL_USER}>`,
           to: process.env.EMAIL_USER,
