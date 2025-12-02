@@ -1186,29 +1186,6 @@ async function run() {
     });
 
     // FAIL Route (Dynamic redirect)
-    // app.post("/payment/fail/:tranId", async (req, res) => {
-    //   const payment = await paymentCollection.findOne({
-    //     transactionId: req.params.tranId,
-    //   });
-
-    //   if (!payment) {
-    //     return res.status(404).send("Payment not found");
-    //   }
-
-    //   await paymentCollection.deleteOne({ transactionId: req.params.tranId });
-
-    //   if (payment.source === "myApplications") {
-    //     res.redirect(`https://tutoria-jet.vercel.app/tutor/myApplications`);
-    //   } else if (payment.source === "trialClassPayment") {
-    //     res.redirect(`https://tutoria-jet.vercel.app/student/hired-tutors`);
-    //   } else if (payment.source === "advanceSalary") {
-    //     res.redirect(`https://tutoria-jet.vercel.app/student/hired-tutors`);
-    //   } else if (payment.source === "getPremium") {
-    //     res.redirect(
-    //       `https://tutoria-jet.vercel.app/${payment.role}/get-premium`
-    //     );
-    //   }
-    // });
     app.post("/payment/fail/:tranId", async (req, res) => {
       const payment = await paymentCollection.findOne({
         transactionId: req.params.tranId,
@@ -1224,12 +1201,22 @@ async function run() {
       // If payment was for premium, revert user profile to Free
       if (payment.source === "getPremium") {
         await userCollection.updateOne(
-          { email: payment.email }, // or _id if stored
+          { email: payment.email }, 
           {
             $set: { profileStatus: "Free" },
             $unset: { premiumExpiry: "" }, // remove the field completely
           }
         );
+        // Update tutor if role is tutor
+        if (payment.role === "tutor") {
+          await tutorCollection.updateOne(
+            { email: payment.email },
+            {
+              $set: { profileStatus: "Free" },
+              $unset: { premiumExpiry: "" },
+            }
+          );
+        }
       }
 
       // Redirect based on payment origin
