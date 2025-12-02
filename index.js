@@ -283,7 +283,7 @@ async function run() {
       next();
     };
 
-    app.get("/users",verifyToken,verifyAdmin, async (req, res) => {
+    app.get("/users", verifyToken, verifyAdmin, async (req, res) => {
       const users = await userCollection.find().toArray();
       res.send(users);
     });
@@ -1073,10 +1073,10 @@ async function run() {
         total_amount: amount,
         currency: "BDT",
         tran_id,
-        success_url: `http://localhost:5000/payment/success/${tran_id}`,
-        fail_url: `http://localhost:5000/payment/fail/${tran_id}`,
-        cancel_url: `http://localhost:5000/paymentCancel`,
-        ipn_url: `http://localhost:5000/ipn`,
+        success_url: `https://tutoria-server.vercel.app/payment/success/${tran_id}`,
+        fail_url: `https://tutoria-server.vercel.app/payment/fail/${tran_id}`,
+        cancel_url: `https://tutoria-server.vercel.app/paymentCancel`,
+        ipn_url: `https://tutoria-server.vercel.app/ipn`,
         shipping_method: "Courier",
         product_name: productName,
         product_category: "Tuition",
@@ -1186,6 +1186,29 @@ async function run() {
     });
 
     // FAIL Route (Dynamic redirect)
+    // app.post("/payment/fail/:tranId", async (req, res) => {
+    //   const payment = await paymentCollection.findOne({
+    //     transactionId: req.params.tranId,
+    //   });
+
+    //   if (!payment) {
+    //     return res.status(404).send("Payment not found");
+    //   }
+
+    //   await paymentCollection.deleteOne({ transactionId: req.params.tranId });
+
+    //   if (payment.source === "myApplications") {
+    //     res.redirect(`https://tutoria-jet.vercel.app/tutor/myApplications`);
+    //   } else if (payment.source === "trialClassPayment") {
+    //     res.redirect(`https://tutoria-jet.vercel.app/student/hired-tutors`);
+    //   } else if (payment.source === "advanceSalary") {
+    //     res.redirect(`https://tutoria-jet.vercel.app/student/hired-tutors`);
+    //   } else if (payment.source === "getPremium") {
+    //     res.redirect(
+    //       `https://tutoria-jet.vercel.app/${payment.role}/get-premium`
+    //     );
+    //   }
+    // });
     app.post("/payment/fail/:tranId", async (req, res) => {
       const payment = await paymentCollection.findOne({
         transactionId: req.params.tranId,
@@ -1195,20 +1218,40 @@ async function run() {
         return res.status(404).send("Payment not found");
       }
 
+      // Delete failed payment record
       await paymentCollection.deleteOne({ transactionId: req.params.tranId });
 
+      // If payment was for premium, revert user profile to Free
+      if (payment.source === "getPremium") {
+        await userCollection.updateOne(
+          { email: payment.email }, // or _id if stored
+          {
+            $set: { profileStatus: "Free" },
+            $unset: { premiumExpiry: "" }, // remove the field completely
+          }
+        );
+      }
+
+      // Redirect based on payment origin
       if (payment.source === "myApplications") {
-        res.redirect(`https://tutoria-jet.vercel.app/tutor/myApplications`);
+        return res.redirect(
+          `https://tutoria-jet.vercel.app/tutor/myApplications`
+        );
       } else if (payment.source === "trialClassPayment") {
-        res.redirect(`https://tutoria-jet.vercel.app/student/hired-tutors`);
+        return res.redirect(
+          `https://tutoria-jet.vercel.app/student/hired-tutors`
+        );
       } else if (payment.source === "advanceSalary") {
-        res.redirect(`https://tutoria-jet.vercel.app/student/hired-tutors`);
+        return res.redirect(
+          `https://tutoria-jet.vercel.app/student/hired-tutors`
+        );
       } else if (payment.source === "getPremium") {
-        res.redirect(
+        return res.redirect(
           `https://tutoria-jet.vercel.app/${payment.role}/get-premium`
         );
       }
     });
+
     // GET payment by transactionId
 
     app.get("/payment/success/:tranId", async (req, res) => {
@@ -1538,22 +1581,27 @@ async function run() {
 
     //.......................................//
     // Get all demo tutor requests
-    app.get("/tutorRequests/demo", verifyToken,verifyAdmin, async (req, res) => {
-      try {
-        const requests = await tutorRequestDemoCollection
-          .find({})
-          .sort({ createdAt: -1 })
-          .toArray();
+    app.get(
+      "/tutorRequests/demo",
+      verifyToken,
+      verifyAdmin,
+      async (req, res) => {
+        try {
+          const requests = await tutorRequestDemoCollection
+            .find({})
+            .sort({ createdAt: -1 })
+            .toArray();
 
-        res.status(200).json({
-          message: "Demo requests fetched successfully",
-          requests,
-        });
-      } catch (err) {
-        console.error("Error fetching demo requests:", err);
-        res.status(500).json({ message: "Server error" });
+          res.status(200).json({
+            message: "Demo requests fetched successfully",
+            requests,
+          });
+        } catch (err) {
+          console.error("Error fetching demo requests:", err);
+          res.status(500).json({ message: "Server error" });
+        }
       }
-    });
+    );
 
     // ------------------ SEND LINK ROUTE ------------------
     app.post("/tutorRequests/send-link", async (req, res) => {
