@@ -823,8 +823,6 @@ async function run() {
                   .includes(request.location?.trim().toLowerCase())
               );
 
-              console.log("Premium tutors to email:", tutorsToEmail);
-
               if (tutorsToEmail.length > 0) {
                 const transporter = nodemailer.createTransport({
                   service: "gmail",
@@ -1142,15 +1140,15 @@ async function run() {
 
       if (payment.source === "myApplications") {
         res.redirect(
-          `http://localhost:5173/tutor/payment/success/${req.params.tranId}`
+          `https://tutoria-jet.vercel.app/tutor/payment/success/${req.params.tranId}`
         );
       } else if (payment.source === "trialClassPayment") {
         res.redirect(
-          `http://localhost:5173/student/payment/success/${req.params.tranId}`
+          `https://tutoria-jet.vercel.app/student/payment/success/${req.params.tranId}`
         );
       } else if (payment.source === "advanceSalary") {
         res.redirect(
-          `http://localhost:5173/student/payment/success/${req.params.tranId}`
+          `https://tutoria-jet.vercel.app/student/payment/success/${req.params.tranId}`
         );
       } else if (payment.source === "getPremium") {
         // Set premium expiry date (30 days from now)
@@ -1182,7 +1180,7 @@ async function run() {
         }
 
         res.redirect(
-          `http://localhost:5173/${payment.role}/payment/success/${req.params.tranId}`
+          `https://tutoria-jet.vercel.app/${payment.role}/payment/success/${req.params.tranId}`
         );
       }
     });
@@ -1200,13 +1198,15 @@ async function run() {
       await paymentCollection.deleteOne({ transactionId: req.params.tranId });
 
       if (payment.source === "myApplications") {
-        res.redirect(`http://localhost:5173/tutor/myApplications`);
+        res.redirect(`https://tutoria-jet.vercel.app/tutor/myApplications`);
       } else if (payment.source === "trialClassPayment") {
-        res.redirect(`http://localhost:5173/student/hired-tutors`);
+        res.redirect(`https://tutoria-jet.vercel.app/student/hired-tutors`);
       } else if (payment.source === "advanceSalary") {
-        res.redirect(`http://localhost:5173/student/hired-tutors`);
+        res.redirect(`https://tutoria-jet.vercel.app/student/hired-tutors`);
       } else if (payment.source === "getPremium") {
-        res.redirect(`http://localhost:5173/${payment.role}/get-premium`);
+        res.redirect(
+          `https://tutoria-jet.vercel.app/${payment.role}/get-premium`
+        );
       }
     });
     // GET payment by transactionId
@@ -1738,6 +1738,47 @@ async function run() {
       } catch (err) {
         console.error(err);
         res.status(500).json({ message: "Server error" });
+      }
+    });
+    //........................................//
+    app.post("/contact", async (req, res) => {
+      try {
+        const { name, email, message } = req.body;
+
+        if (!name || !email || !message) {
+          return res.status(400).json({ message: "All fields are required" });
+        }
+
+        // setup email transporter
+        const transporter = nodemailer.createTransport({
+          service: "gmail",
+          auth: {
+            user: process.env.EMAIL_USER,
+            pass: process.env.EMAIL_PASS,
+          },
+        });
+
+        // Email format you will receive
+        await transporter.sendMail({
+          from: `"TuToria Contact Form" <${process.env.EMAIL_USER}>`,
+          to: process.env.EMAIL_USER,
+          subject: "New Contact Message From TuToria Website",
+          html: `
+        <h3>New Message from TuToria Contact Form</h3>
+        <p><strong>Name:</strong> ${name}</p>
+        <p><strong>Email:</strong> ${email}</p>
+        <p><strong>Message:</strong></p>
+        <p>${message}</p>
+      `,
+        });
+
+        res.json({
+          success: true,
+          message: "Message sent successfully!",
+        });
+      } catch (error) {
+        console.log("Error sending contact email:", error);
+        res.status(500).json({ message: "Error sending message" });
       }
     });
 
