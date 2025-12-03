@@ -1201,7 +1201,7 @@ async function run() {
       // If payment was for premium, revert user profile to Free
       if (payment.source === "getPremium") {
         await userCollection.updateOne(
-          { email: payment.email }, 
+          { email: payment.email },
           {
             $set: { profileStatus: "Free" },
             $unset: { premiumExpiry: "" }, // remove the field completely
@@ -1810,6 +1810,48 @@ async function run() {
       } catch (error) {
         console.log("Error sending contact email:", error);
         res.status(500).json({ message: "Error sending message" });
+      }
+    });
+
+    //.......................................//
+
+    // DELETE payment
+    app.delete("/payments/:transactionId", async (req, res) => {
+      try {
+        const result = await paymentCollection.deleteOne({
+          transactionId: req.params.transactionId,
+        });
+
+        if (result.deletedCount === 0) {
+          return res.status(404).send("Payment not found");
+        }
+
+        res.send({ message: "Payment deleted successfully" });
+      } catch (error) {
+        console.log(error);
+        res.status(500).send("Internal Server Error");
+      }
+    });
+
+    //.......................................//
+    // Update payment status
+    app.put("/payments/send-to-tutor/:transactionId", async (req, res) => {
+      try {
+        const transactionId = req.params.transactionId;
+
+        const result = await paymentCollection.updateOne(
+          { transactionId },
+          { $set: { status: "sendToTutor" } }
+        );
+
+        if (result.matchedCount === 0) {
+          return res.status(404).send("Payment not found");
+        }
+
+        res.send({ message: "Payment sent to tutor successfully" });
+      } catch (error) {
+        console.error(error);
+        res.status(500).send("Internal Server Error");
       }
     });
 
