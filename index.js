@@ -6,6 +6,8 @@ const crypto = require("crypto");
 const nodemailer = require("nodemailer");
 const SSLCommerzPayment = require("sslcommerz-lts");
 const jwt = require("jsonwebtoken");
+const { createUserRouter } = require("./routes/userRoutes");
+const { createTutorRequestRouter } = require("./routes/tutorRequestRoutes");
 const app = express();
 const { ObjectId } = require("mongodb");
 
@@ -92,157 +94,20 @@ async function run() {
       return `${lastNumber + 1}`;
     }
 
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    app.use(
+      createUserRouter({
+        userCollection,
+        tutorCollection,
+        generateCustomId,
+      })
+    );
 
-    const sanitizeString = (value) => {
-      if (typeof value === "string") {
-        return value.trim();
-      }
-      if (typeof value === "number") {
-        return value.toString().trim();
-      }
-      return "";
-    };
-
-    const normalizeEmail = (value) => {
-      const email = sanitizeString(value).toLowerCase();
-      return emailRegex.test(email) ? email : "";
-    };
-
-    const coerceNumber = (value) => {
-      if (value === undefined || value === null) {
-        return null;
-      }
-
-      if (typeof value === "number" && Number.isFinite(value)) {
-        return value;
-      }
-
-      if (typeof value === "string") {
-        const numericPortion = value.replace(/[^0-9.]/g, "");
-        if (!numericPortion) {
-          return null;
-        }
-        const parsed = Number(numericPortion);
-        return Number.isFinite(parsed) ? parsed : null;
-      }
-
-      return null;
-    };
-
-    const toPositiveNumber = (value) => {
-      const num = coerceNumber(value);
-      if (!Number.isFinite(num) || num <= 0) {
-        return null;
-      }
-      return num;
-    };
-
-    const normalizeSubjects = (subjects) => {
-      if (!subjects) {
-        return [];
-      }
-
-      if (Array.isArray(subjects)) {
-        return subjects.map(sanitizeString).filter(Boolean);
-      }
-
-      if (typeof subjects === "string") {
-        return subjects.split(",").map(sanitizeString).filter(Boolean);
-      }
-
-      return [];
-    };
-
-    function validateTutorRequestPayload(payload) {
-      if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-        return {
-          isValid: false,
-          errors: ["Each tutor request must be an object"],
-          sanitized: null,
-        };
-      }
-
-      const errors = [];
-      const sanitized = { ...payload };
-
-      sanitized.studentEmail = normalizeEmail(
-        payload.studentEmail || payload.email
-      );
-      if (!sanitized.studentEmail) {
-        errors.push("studentEmail is required and must be valid");
-      }
-
-      sanitized.studentName = sanitizeString(
-        payload.studentName || payload.name
-      );
-      if (!sanitized.studentName) {
-        errors.push("studentName is required");
-      }
-
-      sanitized.phone = sanitizeString(
-        payload.phone ||
-          payload.contactNumber ||
-          payload.guardianPhone ||
-          payload.mobile
-      );
-      if (!sanitized.phone) {
-        errors.push("phone is required");
-      }
-
-      sanitized.city = sanitizeString(payload.city);
-      if (!sanitized.city) {
-        errors.push("city is required");
-      }
-
-      sanitized.location = sanitizeString(payload.location);
-      if (!sanitized.location) {
-        errors.push("location is required");
-      }
-
-      sanitized.classCourse = sanitizeString(
-        payload.classCourse || payload.classLevel
-      );
-      if (!sanitized.classCourse) {
-        errors.push("classCourse is required");
-      }
-
-      const subjects = normalizeSubjects(payload.subjects || payload.subject);
-      if (!subjects.length) {
-        errors.push("subjects must include at least one value");
-      } else {
-        sanitized.subjects = subjects;
-      }
-
-      const salary = toPositiveNumber(payload.salary);
-      if (salary === null) {
-        errors.push("salary must be a positive number");
-      } else {
-        sanitized.salary = salary;
-      }
-
-      const daysPerWeek = toPositiveNumber(payload.daysPerWeek);
-      if (daysPerWeek !== null) {
-        sanitized.daysPerWeek = daysPerWeek;
-      }
-
-      const weeklyDuration = toPositiveNumber(payload.weeklyDuration);
-      if (weeklyDuration !== null) {
-        sanitized.weeklyDuration = weeklyDuration;
-      }
-
-      sanitized.description = sanitizeString(payload.description);
-
-      delete sanitized.tuitionId;
-      delete sanitized.createdAt;
-      delete sanitized.appliedTutors;
-
-      return {
-        isValid: errors.length === 0,
-        errors,
-        sanitized,
-      };
-    }
+    app.use(
+      createTutorRequestRouter({
+        tutorRequestCollection,
+        generateTuitionId,
+      })
+    );
 
     //............................................
 
@@ -339,63 +204,6 @@ async function run() {
         console.error("Error fetching user:", error);
         res.status(500).send({ error: "Internal server error" });
       }
-    });
-
-    app.post("/users", async (req, res) => {
-      const user = req.body;
-
-      const query = {
-        $or: [{ email: user.email }, { phone: user.phone }],
-      };
-      const existingUser = await userCollection.findOne(query);
-      if (existingUser) {
-        return res.send({ message: "user already exists", insertedId: null });
-      }
-
-      // Custom ID generate
-      const customId = await generateCustomId(user.role, userCollection);
-
-      const newUser = {
-        ...user,
-        customId,
-
-        createdAt: new Date(),
-      };
-
-      const result = await userCollection.insertOne(newUser);
-      res.send({ ...result, customId });
-    });
-
-    app.post("/tutors", async (req, res) => {
-      const tutor = req.body;
-
-      // Only allow tutor role to be added to tutors collection
-      if (tutor.role !== "tutor") {
-        return res
-          .status(400)
-          .send({ message: "Only tutors can be added to tutors collection" });
-      }
-
-      const query = { email: tutor.email };
-      const existingTutor = await tutorCollection.findOne(query);
-      if (existingTutor) {
-        return res.send({ message: "Tutor already exists", insertedId: null });
-      }
-
-      tutor.role = "tutor";
-
-      // Custom ID generate
-      const customId = await generateCustomId("tutor", tutorCollection);
-
-      const newTutor = {
-        ...tutor,
-        customId,
-
-        createdAt: new Date(),
-      };
-
-      const result = await tutorCollection.insertOne(newTutor);
-      res.send({ ...result, customId });
     });
 
     //.....................//
@@ -594,104 +402,6 @@ async function run() {
     });
 
     // Post tutor request (single or bulk)
-
-    app.post("/tutorRequests", async (req, res) => {
-      try {
-        const payload = req.body;
-
-        if (Array.isArray(payload)) {
-          if (payload.length === 0) {
-            return res.status(400).send({
-              message: "Payload array must contain at least one request",
-            });
-          }
-
-          const validationResults = payload.map((item, index) => ({
-            index,
-            ...validateTutorRequestPayload(item),
-          }));
-
-          const validItems = validationResults
-            .filter((entry) => entry.isValid)
-            .map((entry) => entry.sanitized);
-
-          if (validItems.length === 0) {
-            return res.status(422).send({
-              message: "All tutor requests failed validation",
-              errors: validationResults.map(({ index, errors }) => ({
-                index,
-                errors,
-              })),
-            });
-          }
-
-          // Generate tuition IDs for bulk insert
-          const lastRequest = await tutorRequestCollection.findOne(
-            {},
-            { sort: { createdAt: -1 } }
-          );
-          const lastNumber = lastRequest?.tuitionId
-            ? parseInt(lastRequest.tuitionId, 10) || 0
-            : 0;
-          const tuitionIds = Array.from(
-            { length: validItems.length },
-            (_, idx) => `${lastNumber + idx + 1}`
-          );
-
-          const docsToInsert = validItems.map((item, idx) => ({
-            ...item,
-            tuitionId: tuitionIds[idx],
-            createdAt: new Date(),
-          }));
-
-          const insertResult = await tutorRequestCollection.insertMany(
-            docsToInsert
-          );
-
-          const rejected = validationResults
-            .filter((entry) => !entry.isValid)
-            .map(({ index, errors }) => ({ index, errors }));
-
-          return res.status(rejected.length ? 207 : 201).send({
-            message: rejected.length
-              ? "Tutor requests processed with some validation failures"
-              : "Tutor requests submitted successfully",
-            insertedCount: insertResult.insertedCount,
-            insertedIds: Object.values(insertResult.insertedIds).map((id) =>
-              id.toString()
-            ),
-            rejected,
-          });
-        }
-
-        const { isValid, errors, sanitized } =
-          validateTutorRequestPayload(payload);
-
-        if (!isValid) {
-          return res.status(422).send({
-            message: "Validation failed",
-            errors,
-          });
-        }
-
-        const tuitionId = await generateTuitionId(tutorRequestCollection);
-
-        const result = await tutorRequestCollection.insertOne({
-          ...sanitized,
-          tuitionId,
-          createdAt: new Date(),
-        });
-
-        res.status(201).send({
-          message: "Tutor request submitted successfully",
-          insertedId: result.insertedId,
-          tuitionId,
-        });
-      } catch (error) {
-        console.error("Error submitting tutor request:", error);
-        res.status(500).send({ message: "Error submitting tutor request" });
-      }
-    });
 
     // get all tutor requests
     app.get("/tutorRequests", async (req, res) => {
